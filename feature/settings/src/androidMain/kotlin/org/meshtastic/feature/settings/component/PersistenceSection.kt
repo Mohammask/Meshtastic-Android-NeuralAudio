@@ -1,0 +1,150 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.feature.settings.component
+
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity.RESULT_OK
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.tooling.preview.Preview
+import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.format
+import kotlinx.datetime.format.char
+import kotlinx.datetime.toLocalDateTime
+import org.jetbrains.compose.resources.stringResource
+import org.meshtastic.core.common.util.CommonUri
+import org.meshtastic.core.common.util.nowMillis
+import org.meshtastic.core.resources.Res
+import org.meshtastic.core.resources.app_settings
+import org.meshtastic.core.resources.export_data_csv
+import org.meshtastic.core.resources.export_node_db
+import org.meshtastic.core.resources.save_rangetest
+import org.meshtastic.core.ui.component.ListItem
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.icon.Output
+import org.meshtastic.core.ui.theme.AppTheme
+import org.meshtastic.core.ui.util.rememberSaveFileLauncher
+import kotlin.time.Instant.Companion.fromEpochMilliseconds
+
+private val EXPORT_TIMESTAMP_FORMAT =
+    LocalDateTime.Format {
+        year()
+        monthNumber()
+        day()
+        char('_')
+        hour()
+        minute()
+        second()
+    }
+
+/** Section for settings related to data persistence and exports. */
+@Composable
+internal fun ColumnScope.PersistenceSettingsContent(
+    cacheLimit: Int,
+    onCheckCacheLimitEvictionCount: suspend (Int) -> Int,
+    onSetCacheLimit: (Int) -> Unit,
+    nodeShortName: String,
+    onExportData: (android.net.Uri) -> Unit,
+    onExportNodeDb: (CommonUri) -> Unit,
+) {
+    val timestamp =
+        fromEpochMilliseconds(nowMillis)
+            .toLocalDateTime(TimeZone.currentSystemDefault())
+            .format(EXPORT_TIMESTAMP_FORMAT)
+
+    val exportRangeTestLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) {
+                it.data?.data?.let { uri -> onExportData(uri) }
+            }
+        }
+
+    val exportDataLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            if (it.resultCode == RESULT_OK) {
+                it.data?.data?.let { uri -> onExportData(uri) }
+            }
+        }
+
+    CacheLimitPreference(
+        cacheLimit = cacheLimit,
+        onCheckEvictionCount = onCheckCacheLimitEvictionCount,
+        onSetCacheLimit = onSetCacheLimit,
+    )
+
+    ListItem(
+        text = stringResource(Res.string.save_rangetest),
+        leadingIcon = MeshtasticIcons.Output,
+        trailingIcon = null,
+    ) {
+        val intent =
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/csv"
+                putExtra(Intent.EXTRA_TITLE, "Meshtastic_rangetest_${nodeShortName}_$timestamp.csv")
+            }
+        exportRangeTestLauncher.launch(intent)
+    }
+
+    ListItem(
+        text = stringResource(Res.string.export_data_csv),
+        leadingIcon = MeshtasticIcons.Output,
+        trailingIcon = null,
+    ) {
+        val intent =
+            Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/csv"
+                putExtra(Intent.EXTRA_TITLE, "Meshtastic_datalog_${nodeShortName}_$timestamp.csv")
+            }
+        exportDataLauncher.launch(intent)
+    }
+
+    ExportNodeDbItem(nodeShortName = nodeShortName, timestamp = timestamp, onExportNodeDb = onExportNodeDb)
+}
+
+@Composable
+private fun ExportNodeDbItem(nodeShortName: String, timestamp: String, onExportNodeDb: (CommonUri) -> Unit) {
+    val exportNodeDbLauncher = rememberSaveFileLauncher { uri -> onExportNodeDb(uri) }
+    ListItem(
+        text = stringResource(Res.string.export_node_db),
+        leadingIcon = MeshtasticIcons.Output,
+        trailingIcon = null,
+    ) {
+        exportNodeDbLauncher("Meshtastic_nodedb_${nodeShortName}_$timestamp.json", "application/json")
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun PersistenceSectionPreview() {
+    AppTheme {
+        ExpressiveSection(title = stringResource(Res.string.app_settings)) {
+            PersistenceSettingsContent(
+                cacheLimit = 100,
+                onCheckCacheLimitEvictionCount = { 0 },
+                onSetCacheLimit = {},
+                nodeShortName = "TEST",
+                onExportData = {},
+                onExportNodeDb = {},
+            )
+        }
+    }
+}

@@ -1,0 +1,1 @@
+Aplicația oficială pentru Meshtastic, un radio open, off-grid, mess.

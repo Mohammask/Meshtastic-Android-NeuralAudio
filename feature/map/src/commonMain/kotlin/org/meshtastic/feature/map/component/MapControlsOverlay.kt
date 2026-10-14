@@ -1,0 +1,173 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
+
+package org.meshtastic.feature.map.component
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularWavyProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FloatingToolbarDefaults
+import androidx.compose.material3.HorizontalFloatingToolbar
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.unit.dp
+import org.jetbrains.compose.resources.stringResource
+import org.meshtastic.core.resources.Res
+import org.meshtastic.core.resources.map_filter
+import org.meshtastic.core.resources.orient_north
+import org.meshtastic.core.resources.refresh
+import org.meshtastic.core.resources.site_planner
+import org.meshtastic.core.resources.toggle_my_position
+import org.meshtastic.core.ui.icon.CellTower
+import org.meshtastic.core.ui.icon.LocationDisabled
+import org.meshtastic.core.ui.icon.MapCompass
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.icon.MyLocation
+import org.meshtastic.core.ui.icon.Refresh
+import org.meshtastic.core.ui.icon.Tune
+import org.meshtastic.core.ui.theme.StatusColors.StatusBlue
+import org.meshtastic.core.ui.theme.StatusColors.StatusRed
+
+/**
+ * Shared map controls overlay using [HorizontalFloatingToolbar] for Material 3 Expressive styling. Provides compass,
+ * filter button, location tracking button, and optional slots for flavor-specific content (map type selector, layers,
+ * refresh).
+ *
+ * Zoom is deliberately not here — it lives in [MapZoomControls], in the lower corner where Google Maps draws its own.
+ *
+ * @param onToggleFilterMenu Callback to open/close the filter dropdown.
+ * @param filterDropdownContent Composable rendered inside a [Box] alongside the filter button — [MapFilterSheet] on the
+ *   main map, a dropdown on the node-track map.
+ * @param filtersActive Whether any filter is narrowing what the map shows. Badges the button, because a filter that
+ *   hides nodes is otherwise indistinguishable from a quiet mesh.
+ * @param mapTypeContent Optional composable for a map type selector button + dropdown. Google flavor provides map type
+ *   and custom tile options; F-Droid provides a tile source selector.
+ * @param layersContent Optional composable for a layers management button.
+ * @param showRefresh Whether to show a refresh button (e.g., for network map layers).
+ * @param isRefreshing Whether a refresh is currently in progress.
+ * @param onRefresh Callback when the refresh button is clicked.
+ */
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Suppress("LongParameterList")
+@Composable
+fun MapControlsOverlay(
+    modifier: Modifier = Modifier,
+    /** Null hides the button, for maps with nothing worth filtering — a traceroute or a discovery scan. */
+    onToggleFilterMenu: (() -> Unit)? = null,
+    bearing: Float = 0f,
+    onCompassClick: () -> Unit = {},
+    followPhoneBearing: Boolean = false,
+    filterDropdownContent: @Composable () -> Unit = {},
+    filtersActive: Boolean = false,
+    mapTypeContent: @Composable () -> Unit = {},
+    layersContent: @Composable () -> Unit = {},
+    onSitePlannerClick: (() -> Unit)? = null,
+    isLocationTrackingEnabled: Boolean = false,
+    /** Null hides the button, for maps with no location plumbing behind it — the node-track map. */
+    onToggleLocationTracking: (() -> Unit)? = null,
+    showRefresh: Boolean = false,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
+) {
+    HorizontalFloatingToolbar(
+        expanded = true,
+        modifier = modifier,
+        colors = FloatingToolbarDefaults.standardFloatingToolbarColors(),
+    ) {
+        // Compass
+        CompassButton(onClick = onCompassClick, bearing = bearing, isFollowing = followPhoneBearing)
+
+        // Filter button + dropdown (optional)
+        onToggleFilterMenu?.let { onClick ->
+            Box {
+                BadgedBox(badge = { if (filtersActive) Badge() }) {
+                    MapButton(
+                        icon = MeshtasticIcons.Tune,
+                        contentDescription = stringResource(Res.string.map_filter),
+                        onClick = onClick,
+                    )
+                }
+                filterDropdownContent()
+            }
+        }
+
+        // Map type selector (flavor-specific)
+        mapTypeContent()
+
+        // Layers button (flavor-specific)
+        layersContent()
+
+        // Site Planner coverage estimate (optional; provided by the Google flavor)
+        onSitePlannerClick?.let { onClick ->
+            MapButton(
+                icon = MeshtasticIcons.CellTower,
+                contentDescription = stringResource(Res.string.site_planner),
+                onClick = onClick,
+            )
+        }
+
+        // Refresh button (optional)
+        if (showRefresh) {
+            if (isRefreshing) {
+                Box(modifier = Modifier.padding(8.dp)) {
+                    CircularWavyProgressIndicator(modifier = Modifier.size(24.dp))
+                }
+            } else {
+                MapButton(
+                    icon = MeshtasticIcons.Refresh,
+                    contentDescription = stringResource(Res.string.refresh),
+                    onClick = onRefresh,
+                )
+            }
+        }
+
+        // Location tracking button (optional)
+        onToggleLocationTracking?.let { onClick ->
+            MapButton(
+                icon = if (isLocationTrackingEnabled) MeshtasticIcons.LocationDisabled else MeshtasticIcons.MyLocation,
+                contentDescription = stringResource(Res.string.toggle_my_position),
+                onClick = onClick,
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompassButton(onClick: () -> Unit, bearing: Float, isFollowing: Boolean) {
+    // Tint, not `primary` — tinting the icon `primary` painted it the same color as its own primary-colored
+    // button background, making the compass disappear while following.
+    val iconTint =
+        when {
+            isFollowing -> MaterialTheme.colorScheme.StatusBlue
+            bearing == 0f -> MaterialTheme.colorScheme.StatusRed
+            else -> null
+        }
+    MapButton(
+        modifier = Modifier.rotate(-bearing),
+        icon = MeshtasticIcons.MapCompass,
+        iconTint = iconTint,
+        contentDescription = stringResource(Res.string.orient_north),
+        onClick = onClick,
+    )
+}

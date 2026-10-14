@@ -1,0 +1,1 @@
+Per le note di rilascio dettagliate, visita: https://github.com/meshtastic/Meshtastic-Android/releases/

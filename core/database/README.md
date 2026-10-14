@@ -1,0 +1,50 @@
+# `:core:database`
+
+This module provides the local Room database persistence layer for the application using Room Kotlin Multiplatform (KMP).
+
+## Key Components
+
+-   **`MeshtasticDatabase`**: The main Room database class, defined in `commonMain`.
+-   **DAOs (Data Access Objects)**:
+    -   `NodeInfoDao`: Manages storage and retrieval of node information (`NodeEntity`). Contains critical logic for handling Public Key Conflict (PKC) resolution and preventing identity wiping attacks.
+    -   `PacketDao`: Handles storage of mesh packets, including text messages, waypoints, and reactions.
+-   **Entities**:
+    -   `NodeEntity`: Represents a node on the mesh.
+    -   `Packet`: Represents a stored packet.
+    -   `ReactionEntity`: Represents emoji reactions to packets.
+
+## Security Considerations
+
+### Public Key Conflict (PKC) Handling
+The `NodeInfoDao` implements specific logic to protect against impersonation and "wipe" attacks:
+-   **Wipe Protection**: Receiving an `is_licensed=true` packet (which normally clears the public key for compliance) will **not** clear an existing valid public key if one is already known. This prevents attackers from sending fake licensed packets to wipe keys from the DB.
+-   **Conflict Detection**: If a new key arrives for an existing node ID that conflicts with a known valid key, the key is set to `ERROR_BYTE_STRING` to flag the potential impersonation.
+
+
+## Dependency Graph
+
+<!--region graph-->
+```mermaid
+graph TB
+  :core:database[database]:::kmp-library
+  :core:database --> :core:common
+  :core:database --> :core:model
+  :core:database -.-> :core:di
+  :core:database -.-> :core:resources
+  :core:database -.-> :core:testing
+
+classDef android-application fill:#CAFFBF,stroke:#000,stroke-width:2px,color:#000;
+classDef android-application-compose fill:#CAFFBF,stroke:#000,stroke-width:2px,color:#000;
+classDef compose-desktop-application fill:#CAFFBF,stroke:#000,stroke-width:2px,color:#000;
+classDef android-feature fill:#FFD6A5,stroke:#000,stroke-width:2px,color:#000;
+classDef android-library fill:#9BF6FF,stroke:#000,stroke-width:2px,color:#000;
+classDef android-library-compose fill:#9BF6FF,stroke:#000,stroke-width:2px,color:#000;
+classDef android-test fill:#A0C4FF,stroke:#000,stroke-width:2px,color:#000;
+classDef jvm-library fill:#BDB2FF,stroke:#000,stroke-width:2px,color:#000;
+classDef kmp-feature fill:#FFD6A5,stroke:#000,stroke-width:2px,color:#000;
+classDef kmp-library-compose fill:#FFC1CC,stroke:#000,stroke-width:2px,color:#000;
+classDef kmp-library fill:#FFC1CC,stroke:#000,stroke-width:2px,color:#000;
+classDef unknown fill:#FFADAD,stroke:#000,stroke-width:2px,color:#000;
+
+```
+<!--endregion-->

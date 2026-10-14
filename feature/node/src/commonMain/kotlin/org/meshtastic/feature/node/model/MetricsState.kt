@@ -1,0 +1,98 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.feature.node.model
+
+import org.meshtastic.core.common.util.MeasurementSystem
+import org.meshtastic.core.database.entity.FirmwareRelease
+import org.meshtastic.core.model.DeviceHardware
+import org.meshtastic.core.model.DeviceLink
+import org.meshtastic.core.model.MeshLog
+import org.meshtastic.core.model.Node
+import org.meshtastic.core.model.util.rxTimeOrNull
+import org.meshtastic.proto.FirmwareEdition
+import org.meshtastic.proto.MeshPacket
+import org.meshtastic.proto.Position
+import org.meshtastic.proto.Telemetry
+
+data class MetricsState(
+    val isLocal: Boolean = false,
+    val isManaged: Boolean = true,
+    val isFahrenheit: Boolean = false,
+    val displayUnits: MeasurementSystem = MeasurementSystem.METRIC,
+    val node: Node? = null,
+    val deviceMetrics: List<Telemetry> = emptyList(),
+    val localStats: List<Telemetry> = emptyList(),
+    val signalMetrics: List<MeshPacket> = emptyList(),
+    val powerMetrics: List<Telemetry> = emptyList(),
+    val hostMetrics: List<Telemetry> = emptyList(),
+    val tracerouteRequests: List<MeshLog> = emptyList(),
+    val tracerouteResults: List<MeshLog> = emptyList(),
+    val neighborInfoRequests: List<MeshLog> = emptyList(),
+    val neighborInfoResults: List<MeshLog> = emptyList(),
+    val positionLogs: List<Position> = emptyList(),
+    val deviceHardware: DeviceHardware? = null,
+    /** msh.to vendor/marketplace links for this device's hardware, region-filtered and sorted (vendor first). */
+    val deviceLinks: List<DeviceLink> = emptyList(),
+    val firmwareEdition: FirmwareEdition? = null,
+    val latestStableFirmware: FirmwareRelease = FirmwareRelease(),
+    val latestAlphaFirmware: FirmwareRelease = FirmwareRelease(),
+    val paxMetrics: List<MeshLog> = emptyList(),
+    val airQualityMetrics: List<Telemetry> = emptyList(),
+    /** The PlatformIO environment reported by the device (if known). */
+    val reportedTarget: String? = null,
+) {
+    fun hasDeviceMetrics() = deviceMetrics.isNotEmpty()
+
+    fun hasSignalMetrics() = signalMetrics.isNotEmpty()
+
+    fun hasLocalStats() = localStats.isNotEmpty()
+
+    fun hasPowerMetrics() = powerMetrics.isNotEmpty()
+
+    fun hasTracerouteLogs() = tracerouteRequests.isNotEmpty()
+
+    fun hasNeighborInfoLogs() = neighborInfoRequests.isNotEmpty()
+
+    fun hasPositionLogs() = positionLogs.isNotEmpty()
+
+    fun hasHostMetrics() = hostMetrics.isNotEmpty()
+
+    fun hasPaxMetrics() = paxMetrics.isNotEmpty()
+
+    fun hasAirQualityMetrics() = airQualityMetrics.isNotEmpty()
+
+    /** Finds the oldest timestamp (in seconds) among all collected metric types. */
+    @Suppress("MagicNumber")
+    fun oldestTimestampSeconds(): Long? {
+        val telemetryTimes =
+            (deviceMetrics + localStats + powerMetrics + hostMetrics + airQualityMetrics).map { it.time.toLong() }
+        // Unstamped packets carry no timestamp to compare — dropping them beats letting the epoch win the min.
+        val signalTimes = signalMetrics.mapNotNull { it.rxTimeOrNull()?.toLong() }
+        val logTimes =
+            (tracerouteRequests + tracerouteResults + neighborInfoRequests + neighborInfoResults + paxMetrics).map {
+                it.received_date / 1000L
+            }
+        val positionTimes = positionLogs.map { it.time.toLong() }
+
+        val allTimes = telemetryTimes + signalTimes + logTimes + positionTimes
+        return allTimes.minOrNull()
+    }
+
+    companion object {
+        val Empty = MetricsState()
+    }
+}

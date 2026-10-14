@@ -1,0 +1,67 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+plugins {
+    alias(libs.plugins.meshtastic.kmp.feature)
+    // Shares the bounded zip extraction (ZipExtraction.kt) between the Android and desktop JVM file handlers, which
+    // previously carried two independent copies of the same logic.
+    alias(libs.plugins.meshtastic.kmp.jvm.android)
+    alias(libs.plugins.meshtastic.kotlinx.serialization)
+}
+
+kotlin {
+    android { withHostTest { isIncludeAndroidResources = true } }
+
+    sourceSets {
+        commonMain.dependencies {
+            implementation(projects.core.ble)
+            implementation(projects.core.common)
+            implementation(projects.core.data)
+            implementation(projects.core.database)
+            implementation(projects.core.datastore)
+            implementation(projects.core.di)
+            implementation(projects.core.model)
+            implementation(projects.core.navigation)
+            implementation(projects.core.network)
+            implementation(projects.core.prefs)
+            implementation(projects.core.repository)
+            implementation(libs.meshtastic.protobufs)
+            implementation(projects.core.service)
+            implementation(projects.core.resources)
+            implementation(projects.core.ui)
+
+            implementation(libs.coil)
+            implementation(libs.kotlinx.collections.immutable)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.network)
+            implementation(libs.markdown.renderer)
+            implementation(libs.markdown.renderer.m3)
+        }
+
+        androidMain.dependencies {
+            implementation(libs.markdown.renderer.android)
+            // AndroidFirmwareUsbManager needs UsbSerialDriver to poke DTR on the erase image's CDC port.
+            // :core:network exposes usb-serial as `implementation`, so it is not on our classpath transitively —
+            // feature/connections declares it the same way for the same reason.
+            implementation(libs.usb.serial.android)
+        }
+
+        // performUsbUpdate resolves compose-resources strings, whose desktop implementation needs
+        // the skiko-awt runtime to read the system theme.
+        jvmTest.dependencies { implementation(compose.desktop.currentOs) }
+    }
+}

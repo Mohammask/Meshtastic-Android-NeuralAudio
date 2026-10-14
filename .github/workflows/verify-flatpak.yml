@@ -1,0 +1,159 @@
+name: Verify Flatpak Offline Build
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'scripts/verify-flatpak/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - '.github/workflows/verify-flatpak.yml'
+      # The desktop module's build config shapes the uber jar the flatpak wraps.
+      - 'desktopApp/**'
+      # The offline manifest pins the Gradle distribution independently of the wrapper —
+      # a wrapper bump without a manifest update breaks the offline build silently.
+      - 'gradle/wrapper/**'
+      # build.gradle.kts reads compose-multiplatform from the catalog (#6911), so a
+      # catalog-only bump changes the manifest's platform URLs. Deliberately the whole
+      # file and not a key filter: nearly every Renovate PR lands here so this over-runs,
+      # but a filter naming today's keys goes stale silently the moment the manifest
+      # reads another one — which is the failure #6911 existed to remove.
+      - 'gradle/libs.versions.toml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flatpak-verify-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # One job per arch: splitting generation from the build cost a second runner-queue wait
+  # (8-14 min measured, against ~9 min of generation) — the fan-in serialization
+  # reusable-check.yml documents avoiding. Each leg now captures sources on its own arch.
+  verify-flatpak:
+    name: Verify Flatpak Offline Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.arch == 'aarch64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        arch: [x86_64, aarch64]
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+
+      # Renovate mirrors wrapper bumps into the manifest's distribution URL but cannot
+      # rewrite its sha256, so on a wrapper bump this drift is expected: fail here in
+      # seconds instead of ~15 minutes into the build ("Verification of Gradle
+      # distribution failed!", see #6777/#6782).
+      - name: Check vendored Gradle dist matches the wrapper
+        run: |
+          props=gradle/wrapper/gradle-wrapper.properties
+          manifest=scripts/verify-flatpak/desktop-offline.yaml
+          wrapper_dist=$(grep '^distributionUrl=' "$props" | sed 's|.*/||' || true)
+          wrapper_sha=$(grep '^distributionSha256Sum=' "$props" | cut -d= -f2 || true)
+          manifest_dist=$(grep -o 'gradle-[0-9][^/]*\.zip' "$manifest" || true)
+          manifest_sha=$(awk '/url:.*services\.gradle\.org\/distributions\//{getline; sub(/^[[:space:]]*sha256:[[:space:]]*/, ""); print}' "$manifest")
+          if [ -z "$wrapper_dist" ] || [ -z "$wrapper_sha" ]; then
+            echo "::error file=$props::Could not parse distributionUrl/distributionSha256Sum from $props; the guard in verify-flatpak.yml needs updating."
+            exit 1
+          fi
+          if [ "$wrapper_dist" != "$manifest_dist" ] || [ "$wrapper_sha" != "$manifest_sha" ]; then
+            echo "::error file=$manifest::Vendored Gradle dist is out of sync: $manifest pins '$manifest_dist' (sha256 '$manifest_sha') but $props pins '$wrapper_dist' (sha256 '$wrapper_sha'). Update the url and sha256 in $manifest; the correct sha256 is distributionSha256Sum in $props."
+            exit 1
+          fi
+          echo "OK: $manifest vendors $wrapper_dist, matching $props"
+
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        with:
+          distribution: temurin
+          java-version: 25
+          token: ${{ github.token }}
+
+      # JBR resolves its version list via the GitHub API — unauthenticated requests
+      # rate-limit on the shared runner IPs, so the token is required, not optional.
+      # Non-fatal, matching .github/actions/gradle-setup: Gradle falls back to Foojay.
+      - uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6
+        id: setup-jbr
+        continue-on-error: true
+        with:
+          distribution: jetbrains
+          java-version: 25
+          token: ${{ github.token }}
+
+      - name: JBR setup failed — Gradle will auto-provision via Foojay
+        if: steps.setup-jbr.outcome == 'failure'
+        run: echo "::warning::JBR setup-java failed; falling back to Foojay toolchain provisioning."
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6
+        with:
+          develocity-access-key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+
+      # Isolated Gradle user home (rationale in release.yml): capture only sees cache
+      # MISSES, so caching this directory would empty the manifest, not speed it up.
+      - name: Generate flatpak-sources.json
+        run: |
+          ./gradlew --no-build-cache \
+            -Dgradle.user.home="$RUNNER_TEMP/flatpak-gradle-home" \
+            :desktopApp:packageUberJarForCurrentOS :captureFlatpakSources
+          cp build/flatpak-sources.json flatpak-sources.json
+          echo "### Flatpak Sources Summary (${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
+          echo "- URLs captured: $(jq length flatpak-sources.json)" >> "$GITHUB_STEP_SUMMARY"
+
+      # flatpak-builder re-downloads the whole closure anyway; a second copy just eats disk.
+      - name: Reclaim the isolated Gradle home
+        run: rm -rf "$RUNNER_TEMP/flatpak-gradle-home"
+
+      - name: Clone the Flathub packaging repo
+        run: |
+          git clone --depth 1 --recurse-submodules \
+            https://github.com/flathub/org.meshtastic.MeshtasticDesktop.git \
+            "$RUNNER_TEMP/org.meshtastic.MeshtasticDesktop"
+
+      # Excludes are unanchored (`build/`, not `/build/`): generation now runs in this job,
+      # and a leading slash would let every nested module's build output through.
+      - name: Wire overlay manifest + sources
+        run: |
+          cp scripts/verify-flatpak/desktop-offline.yaml \
+            "$RUNNER_TEMP/org.meshtastic.MeshtasticDesktop/org.meshtastic.MeshtasticDesktop.yaml"
+          cp flatpak-sources.json \
+            "$RUNNER_TEMP/org.meshtastic.MeshtasticDesktop/flatpak-sources.json"
+          rsync -a --delete \
+            --exclude='build/' --exclude='.gradle/' \
+            --exclude='/.idea/' --exclude='/local.properties' \
+            ./ "$RUNNER_TEMP/org.meshtastic.MeshtasticDesktop/meshtastic-android/"
+
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub \
+            https://dl.flathub.org/repo/flathub.flatpakrepo
+
+      - name: Build flatpak offline
+        working-directory: ${{ runner.temp }}/org.meshtastic.MeshtasticDesktop
+        run: |
+          flatpak-builder --user --repo=repo --install-deps-from=flathub \
+            --force-clean builddir org.meshtastic.MeshtasticDesktop.yaml
+          echo "### ✅ Offline Flatpak build succeeded (${{ matrix.arch }})" >> "$GITHUB_STEP_SUMMARY"
+
+      # The build succeeding IS the verification; bundling costs ~2 min per arch for an
+      # artifact nobody installs from a PR. Kept for dispatch, where a tester wants it.
+      - name: Export .flatpak bundle
+        if: github.event_name != 'pull_request'
+        working-directory: ${{ runner.temp }}/org.meshtastic.MeshtasticDesktop
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          flatpak build-bundle repo "org.meshtastic.MeshtasticDesktop.${ARCH}.flatpak" \
+            org.meshtastic.MeshtasticDesktop \
+            --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: github.event_name != 'pull_request'
+        with:
+          name: meshtastic-desktop-flatpak-${{ matrix.arch }}
+          path: ${{ runner.temp }}/org.meshtastic.MeshtasticDesktop/org.meshtastic.MeshtasticDesktop.${{ matrix.arch }}.flatpak

@@ -1,0 +1,201 @@
+name: Create or Promote Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_version:
+        description: 'Base version for the release (e.g., 2.3.0)'
+        required: true
+      channel:
+        description: 'The channel to create a release for or promote to'
+        required: true
+        type: choice
+        options:
+          - internal
+          - closed
+          - open
+          - production
+      dry_run:
+        description: 'If true, calculates the tag but does not push it or start the release'
+        required: true
+        type: boolean
+        default: false
+      no_review_in_flight:
+        description: 'Promotions only: I checked Publishing overview > Submission activity and no submission is In review. Every promotion creates a new Play submission, which CANCELS and RESTARTS any review in flight.'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  statuses: write
+  id-token: write
+  attestations: write
+
+# Never allow two release pipelines to run at once — they race on tags,
+# release objects, and Play track state. Later dispatches queue.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  determine-tags:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    outputs:
+      tag_to_process: ${{ steps.calculate_tags.outputs.tag_to_process }}
+      release_name: ${{ steps.calculate_tags.outputs.release_name }}
+      final_tag: ${{ steps.calculate_tags.outputs.final_tag }}
+      from_channel: ${{ steps.calculate_tags.outputs.from_channel }}
+    steps:
+      # Internal releases are exempt: Play internal testing skips full review,
+      # so only promotions (closed/open/production) can clobber an in-flight
+      # review. Dry runs never reach Play.
+      - name: Require review-in-flight confirmation for promotions
+        if: ${{ !inputs.dry_run && inputs.channel != 'internal' && !inputs.no_review_in_flight }}
+        run: |
+          echo "::error::Promotion blocked: confirm no Play review is in flight. Check Play Console > Publishing overview > Submission activity — if a submission shows 'In review', WAIT (a new promotion cancels it and restarts the clock). If clear, re-dispatch with 'no_review_in_flight' checked."
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.CROWDIN_GITHUB_TOKEN }}
+
+      - name: Calculate tags
+        id: calculate_tags
+        run: |
+          BASE_VERSION="${{ inputs.base_version }}"
+          CHANNEL="${{ inputs.channel }}"
+
+          if [[ "$CHANNEL" == "internal" ]]; then
+            # This is a new build, create a new internal tag
+            LATEST_TAG=$(git tag --list "v${BASE_VERSION}-internal.*" --sort=-v:refname | head -n 1)
+
+            if [ -z "$LATEST_TAG" ]; then
+              INCREMENT=1
+            else
+              INCREMENT=$(echo "$LATEST_TAG" | sed -n "s/.*-internal\.\([0-9]*\)/\1/p" | awk '{print $1+1}')
+            fi
+
+            NEW_TAG="v${BASE_VERSION}-internal.${INCREMENT}"
+            echo "Calculated new tag: $NEW_TAG"
+            {
+              echo "tag_to_process=$NEW_TAG"
+              echo "release_name=$NEW_TAG"
+              echo "final_tag=$NEW_TAG"
+            } >> "$GITHUB_OUTPUT"
+          else
+            # This is a promotion, find the latest tag from the previous channel to promote
+            FROM_CHANNEL="internal"
+            if [[ "$CHANNEL" == "open" ]]; then
+              FROM_CHANNEL="closed"
+            elif [[ "$CHANNEL" == "production" ]]; then
+              FROM_CHANNEL="open"
+            fi
+            
+            LATEST_TAG_TO_PROMOTE=$(git tag --list "v${BASE_VERSION}-${FROM_CHANNEL}.*" --sort=-v:refname | head -n 1)
+
+            if [ -z "$LATEST_TAG_TO_PROMOTE" ]; then
+              echo "::error::No ${FROM_CHANNEL} release found for base version ${BASE_VERSION} to promote."
+              exit 1
+            fi
+
+            echo "Found latest ${FROM_CHANNEL} tag to promote: $LATEST_TAG_TO_PROMOTE"
+
+            # Calculate the increment for the TARGET channel
+            if [[ "$CHANNEL" != "production" ]]; then
+                LATEST_CHANNEL_TAG=$(git tag --list "v${BASE_VERSION}-${CHANNEL}.*" --sort=-v:refname | head -n 1)
+
+                if [ -z "$LATEST_CHANNEL_TAG" ]; then
+                  INCREMENT=1
+                else
+                  INCREMENT=$(echo "$LATEST_CHANNEL_TAG" | sed -n "s/.*-${CHANNEL}\.\([0-9]*\)/\1/p" | awk '{print $1+1}')
+                fi
+                
+                NEW_TAG="v${BASE_VERSION}-${CHANNEL}.${INCREMENT}"
+            else
+                # Production is special, it has no increment
+                NEW_TAG="v${BASE_VERSION}"
+            fi
+
+            echo "New release name will be: $NEW_TAG"
+            echo "Final tag will be: $NEW_TAG"
+            {
+              echo "from_channel=${FROM_CHANNEL}"
+              echo "tag_to_process=${LATEST_TAG_TO_PROMOTE}"
+              echo "release_name=${NEW_TAG}"
+              echo "final_tag=${NEW_TAG}"
+            } >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+
+      - name: Create and Push Release Tag
+        if: ${{ !inputs.dry_run && inputs.channel == 'internal' }}
+        env:
+          FINAL_TAG: ${{ steps.calculate_tags.outputs.final_tag }}
+        run: |
+          echo "Tagging and pushing release: $FINAL_TAG"
+          git tag "$FINAL_TAG"
+          git push origin "$FINAL_TAG"
+        shell: bash
+
+  call-release-workflow:
+    if: ${{ !inputs.dry_run && inputs.channel == 'internal' }}
+    needs: determine-tags
+    uses: ./.github/workflows/release.yml
+    with:
+      tag_name: ${{ needs.determine-tags.outputs.final_tag }}
+      channel: ${{ inputs.channel }}
+      base_version: ${{ inputs.base_version }}
+      build_desktop: true
+      build_flatpak_src: true
+    secrets: inherit
+
+  call-promote-workflow:
+    if: ${{ !inputs.dry_run && inputs.channel != 'internal' }}
+    needs: determine-tags
+    # promote.yml's token is capped by this job's grants, and a called
+    # workflow requesting more than its caller grants fails at startup —
+    # so this must cover promote.yml's declared workflow-level set, plus
+    # actions: write for its publish-workflow dispatch. Scoped to this job
+    # so call-release-workflow doesn't carry it.
+    permissions:
+      contents: write
+      pull-requests: write
+      statuses: write
+      id-token: write
+      attestations: write
+      actions: write
+    uses: ./.github/workflows/promote.yml
+    with:
+      tag_name: ${{ needs.determine-tags.outputs.tag_to_process }}
+      release_name: ${{ needs.determine-tags.outputs.release_name }}
+      final_tag: ${{ needs.determine-tags.outputs.final_tag }}
+      channel: ${{ inputs.channel }}
+      base_version: ${{ inputs.base_version }}
+      from_channel: ${{ needs.determine-tags.outputs.from_channel }}
+    secrets: inherit
+
+  cleanup-on-failure:
+    needs: [determine-tags, call-release-workflow]
+    if: ${{ (failure() || cancelled()) && !inputs.dry_run && inputs.channel == 'internal' }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Delete Failed or Cancelled Tag
+        env:
+          FINAL_TAG: ${{ needs.determine-tags.outputs.final_tag }}
+        run: |
+          if [ -n "$FINAL_TAG" ]; then
+            echo "Release workflow failed or was cancelled. Deleting tag $FINAL_TAG to allow a clean retry..."
+            git push origin :refs/tags/"$FINAL_TAG" || echo "Tag was not pushed or already deleted."
+          else
+            echo "No tag was created to delete."
+          fi

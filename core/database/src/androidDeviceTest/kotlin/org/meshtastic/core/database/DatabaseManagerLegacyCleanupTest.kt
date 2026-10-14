@@ -1,0 +1,76 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.core.database
+
+import android.app.Application
+import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.preferencesDataStoreFile
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.meshtastic.core.common.ContextServices
+import org.meshtastic.core.database.di.asDatabaseDataStore
+import org.meshtastic.core.di.CoroutineDispatchers
+
+@RunWith(AndroidJUnit4::class)
+class DatabaseManagerLegacyCleanupTest {
+    @Test
+    fun deletes_legacy_db_on_switch_when_flag_not_set() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        ContextServices.app = app
+        val datastoreName = "db-manager-prefs-test-${System.nanoTime()}"
+        val datastore = createDatabaseDataStore(datastoreName).asDatabaseDataStore()
+
+        // Reset the one-time flag
+        val legacyCleanedKey = booleanPreferencesKey(DatabaseConstants.LEGACY_DB_CLEANED_KEY)
+        datastore.edit { it.remove(legacyCleanedKey) }
+
+        // Ensure legacy DB file exists
+        val legacyName = DatabaseConstants.LEGACY_DB_NAME
+        val legacyFile = app.getDatabasePath(legacyName)
+        // Create or overwrite the legacy DB file by opening it once
+        app.openOrCreateDatabase(legacyName, Context.MODE_PRIVATE, null).close()
+        assertTrue("Precondition: legacy DB should exist before switch", legacyFile.exists())
+
+        val testDispatchers =
+            CoroutineDispatchers(io = Dispatchers.IO, main = Dispatchers.Main, default = Dispatchers.Default)
+        val manager = DatabaseManager(datastore, testDispatchers)
+
+        // Switch to a non-null address so active DB != legacy
+        manager.switchActiveDatabase("01:23:45:67:89:AB")
+
+        // Cleanup runs asynchronously; wait briefly for deletion
+        var attempts = 0
+        while (legacyFile.exists() && attempts < 20) {
+            delay(100)
+            attempts++
+        }
+
+        assertFalse("Legacy DB should be deleted after switch", legacyFile.exists())
+
+        // Clean up
+        app.preferencesDataStoreFile(datastoreName).delete()
+    }
+}

@@ -1,0 +1,63 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.core.data.datasource
+
+import kotlinx.coroutines.flow.Flow
+import org.koin.core.annotation.Single
+import org.meshtastic.core.database.DatabaseProvider
+import org.meshtastic.core.database.entity.MyNodeEntity
+import org.meshtastic.core.database.entity.NodeEntity
+import org.meshtastic.core.database.entity.NodeWithRelations
+import org.meshtastic.core.database.retryOnDbPoolFailure
+
+@Single
+class SwitchingNodeInfoReadDataSource(private val dbManager: DatabaseProvider) : NodeInfoReadDataSource {
+
+    // These flows back process-lifetime eager StateFlows (NodeRepositoryImpl); retryOnDbPoolFailure keeps them
+    // restartable after a pool-wedge failure exhausts observeCurrentDb's in-place recovery budget (#6608).
+    override fun myNodeInfoFlow(): Flow<MyNodeEntity?> =
+        dbManager.observeCurrentDb { db -> db.nodeInfoDao().getMyNodeInfo() }.retryOnDbPoolFailure("myNodeInfo")
+
+    override fun nodeDBbyNumFlow(): Flow<Map<Int, NodeWithRelations>> =
+        dbManager.observeCurrentDb { db -> db.nodeInfoDao().nodeDBbyNum() }.retryOnDbPoolFailure("nodeDBbyNum")
+
+    override fun getNodesFlow(
+        sort: String,
+        includeUnknown: Boolean,
+        hopsAwayMax: Int,
+        lastHeardMin: Int,
+    ): Flow<List<NodeWithRelations>> = dbManager
+        .observeCurrentDb { db ->
+            db.nodeInfoDao()
+                .getNodes(
+                    sort = sort,
+                    includeUnknown = includeUnknown,
+                    hopsAwayMax = hopsAwayMax,
+                    lastHeardMin = lastHeardMin,
+                )
+        }
+        .retryOnDbPoolFailure("getNodes")
+
+    override suspend fun getNodesOlderThan(lastHeard: Int): List<NodeEntity> =
+        dbManager.withReadDb { it.nodeInfoDao().getNodesOlderThan(lastHeard) }
+
+    override suspend fun getUnknownNodes(): List<NodeEntity> =
+        dbManager.withReadDb { it.nodeInfoDao().getUnknownNodes() }
+
+    override suspend fun getNodeDbSnapshot(): Map<Int, NodeWithRelations> =
+        dbManager.withReadDb { it.nodeInfoDao().nodeDBbyNumSnapshot() }
+}

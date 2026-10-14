@@ -1,0 +1,257 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+@file:Suppress("MatchingDeclarationName")
+
+package org.meshtastic.buildlogic
+
+import org.gradle.api.DefaultTask
+import org.gradle.api.Project
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.file.RegularFileProperty
+import org.gradle.api.provider.MapProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.CacheableTask
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputFile
+import org.gradle.api.tasks.OutputFile
+import org.gradle.api.tasks.PathSensitive
+import org.gradle.api.tasks.PathSensitivity.NONE
+import org.gradle.api.tasks.TaskAction
+import org.gradle.kotlin.dsl.register
+import org.gradle.kotlin.dsl.withType
+import org.meshtastic.buildlogic.PluginType.Unknown
+import kotlin.text.RegexOption.DOT_MATCHES_ALL
+
+/** Declaration order is important, as only the first match will be retained. */
+internal enum class PluginType(val id: String, val ref: String, val style: String) {
+    AndroidApplication(
+        id = "meshtastic.android.application",
+        ref = "android-application",
+        style = "fill:#CAFFBF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    AndroidApplicationCompose(
+        id = "meshtastic.android.application.compose",
+        ref = "android-application-compose",
+        style = "fill:#CAFFBF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    ComposeDesktopApplication(
+        id = "?desktop",
+        ref = "compose-desktop-application",
+        style = "fill:#CAFFBF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    AndroidFeature(
+        id = "meshtastic.android.feature",
+        ref = "android-feature",
+        style = "fill:#FFD6A5,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    AndroidLibrary(
+        id = "meshtastic.android.library",
+        ref = "android-library",
+        style = "fill:#9BF6FF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    AndroidLibraryCompose(
+        id = "meshtastic.android.library.compose",
+        ref = "android-library-compose",
+        style = "fill:#9BF6FF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    AndroidTest(
+        id = "meshtastic.android.test",
+        ref = "android-test",
+        style = "fill:#A0C4FF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    Jvm(
+        id = "meshtastic.jvm.library",
+        ref = "jvm-library",
+        style = "fill:#BDB2FF,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    KmpFeature(
+        id = "meshtastic.kmp.feature",
+        ref = "kmp-feature",
+        style = "fill:#FFD6A5,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    KmpLibraryCompose(
+        id = "meshtastic.kmp.library.compose",
+        ref = "kmp-library-compose",
+        style = "fill:#FFC1CC,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    KmpLibrary(
+        id = "meshtastic.kmp.library",
+        ref = "kmp-library",
+        style = "fill:#FFC1CC,stroke:#000,stroke-width:2px,color:#000",
+    ),
+    Unknown(id = "?", ref = "unknown", style = "fill:#FFADAD,stroke:#000,stroke-width:2px,color:#000"),
+}
+
+/** Optimized and Isolated Projects compatible graph configuration. */
+fun Project.configureGraphTasks() {
+    if (!buildFile.exists()) return
+
+    // Android uses bare "api"/"implementation"; KMP uses source-set-prefixed variants
+    // ("commonMainApi", "androidMainImplementation", etc.) — match both by suffix.
+    val explicitConfigs =
+        providers
+            .gradleProperty("graph.supportedConfigurations")
+            .map { it.split(",").toSet() }
+            .orElse(setOf("api", "implementation", "baselineProfile", "testedApks"))
+
+    val targetProjectPath = path
+
+    val dumpTask =
+        tasks.register<GraphDumpTask>("graphDump") {
+            projectPath.set(targetProjectPath)
+
+            dependenciesData.set(
+                providers.provider {
+                    val deps = mutableMapOf<String, Set<Pair<String, String>>>()
+                    val projectDeps = mutableSetOf<Pair<String, String>>()
+                    configurations
+                        .filter { config ->
+                            config.name in explicitConfigs.get() ||
+                                config.name.endsWith("Api") ||
+                                config.name.endsWith("Implementation")
+                        }
+                        .forEach { config ->
+                            config.dependencies.withType<ProjectDependency>().forEach { dep ->
+                                // Normalise to "api" or "implementation" for edge-type rendering.
+                                val isApi = config.name == "api" || config.name.endsWith("Api")
+                                projectDeps.add((if (isApi) "api" else "implementation") to dep.path)
+                            }
+                        }
+                    deps[targetProjectPath] = projectDeps
+                    deps
+                },
+            )
+
+            pluginsData.set(
+                providers.provider {
+                    val projectPlugins = mutableMapOf<String, PluginType>()
+                    val type =
+                        when {
+                            pluginManager.hasPlugin("meshtastic.android.application") ||
+                                pluginManager.hasPlugin("meshtastic.android.application.compose") ->
+                                PluginType.AndroidApplication
+
+                            targetProjectPath.startsWith(":desktopApp") -> PluginType.ComposeDesktopApplication
+
+                            pluginManager.hasPlugin("meshtastic.kmp.feature") -> PluginType.KmpFeature
+
+                            targetProjectPath.startsWith(":feature:") -> PluginType.AndroidFeature
+
+                            else -> PluginType.entries.firstOrNull { pluginManager.hasPlugin(it.id) } ?: Unknown
+                        }
+                    projectPlugins[targetProjectPath] = type
+                    projectPlugins
+                },
+            )
+
+            output.set(layout.buildDirectory.file("mermaid/graph.txt"))
+            legend.set(layout.buildDirectory.file("mermaid/legend.txt"))
+        }
+
+    tasks.register<GraphUpdateTask>("graphUpdate") {
+        projectPath.set(targetProjectPath)
+        input.set(dumpTask.flatMap { it.output })
+        legend.set(dumpTask.flatMap { it.legend })
+        output.set(layout.projectDirectory.file("README.md"))
+    }
+}
+
+@CacheableTask
+private abstract class GraphDumpTask : DefaultTask() {
+
+    @get:Input abstract val projectPath: Property<String>
+
+    @get:Input abstract val dependenciesData: MapProperty<String, Set<Pair<String, String>>>
+
+    @get:Input abstract val pluginsData: MapProperty<String, PluginType>
+
+    @get:OutputFile abstract val output: RegularFileProperty
+
+    @get:OutputFile abstract val legend: RegularFileProperty
+
+    @TaskAction
+    operator fun invoke() {
+        output.get().asFile.writeText(mermaid())
+        legend.get().asFile.writeText(legend())
+    }
+
+    private fun mermaid() = buildString {
+        appendLine("graph TB")
+        val currentProject = projectPath.get()
+        val projectPlugins = pluginsData.get()
+        val projectDeps = dependenciesData.get()[currentProject] ?: emptySet()
+
+        appendLine(
+            "  $currentProject[${currentProject.substringAfterLast(":")}]:::${projectPlugins[currentProject]?.ref}",
+        )
+
+        projectDeps.forEach { (config, depPath) ->
+            val link =
+                when (config) {
+                    "api" -> "-->"
+                    else -> "-.->"
+                }
+            appendLine("  $currentProject $link $depPath")
+        }
+
+        appendLine()
+        PluginType.entries.forEach { appendLine("classDef ${it.ref} ${it.style};") }
+    }
+
+    private fun legend() = buildString {
+        appendLine("graph TB")
+        appendLine("  subgraph Legend")
+        appendLine("    direction TB")
+        appendLine("    L1[Application]:::android-application")
+        appendLine("    L2[Library]:::android-library")
+        appendLine("    L3[Feature]:::android-feature")
+        appendLine("    L4[KMP Library]:::kmp-library")
+        appendLine("  end")
+        PluginType.entries.forEach { appendLine("classDef ${it.ref} ${it.style};") }
+    }
+}
+
+@CacheableTask
+private abstract class GraphUpdateTask : DefaultTask() {
+    @get:Input abstract val projectPath: Property<String>
+
+    @get:InputFile
+    @get:PathSensitive(NONE)
+    abstract val input: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(NONE)
+    abstract val legend: RegularFileProperty
+
+    @get:OutputFile abstract val output: RegularFileProperty
+
+    @TaskAction
+    fun update() {
+        val readme = output.get().asFile
+        if (!readme.exists()) return
+        val mermaid = input.get().asFile.readText()
+        val currentContent = readme.readText()
+        val newContent =
+            currentContent.replace(
+                Regex("<!--region graph-->.*?<!--endregion-->", DOT_MATCHES_ALL),
+                "<!--region graph-->\n```mermaid\n$mermaid\n```\n<!--endregion-->",
+            )
+        if (currentContent != newContent) {
+            readme.writeText(newContent)
+        }
+    }
+}

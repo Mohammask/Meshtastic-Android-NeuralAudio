@@ -1,0 +1,263 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.core.model
+
+import okio.ByteString
+import okio.ByteString.Companion.toByteString
+import org.meshtastic.core.common.util.GPSFormat
+import org.meshtastic.core.common.util.MeasurementSystem
+import org.meshtastic.core.common.util.MetricFormatter
+import org.meshtastic.core.common.util.bearing
+import org.meshtastic.core.common.util.latLongToMeter
+import org.meshtastic.core.model.util.onlineTimeThreshold
+import org.meshtastic.core.model.util.toDistanceString
+import org.meshtastic.proto.AirQualityMetrics
+import org.meshtastic.proto.Config
+import org.meshtastic.proto.DeviceMetadata
+import org.meshtastic.proto.DeviceMetrics
+import org.meshtastic.proto.EnvironmentMetrics
+import org.meshtastic.proto.HardwareModel
+import org.meshtastic.proto.MeshPacket
+import org.meshtastic.proto.Paxcount
+import org.meshtastic.proto.Position
+import org.meshtastic.proto.PowerMetrics
+import org.meshtastic.proto.User
+
+/**
+ * Domain model representing a node in the mesh network.
+ *
+ * This class aggregates user information, position data, and hardware metrics.
+ */
+@Suppress("MagicNumber")
+data class Node(
+    val num: Int,
+    val metadata: DeviceMetadata? = null,
+    val user: User = User(),
+    val position: Position = Position(),
+    val snr: Float = Float.MAX_VALUE,
+    val rssi: Int = Int.MAX_VALUE,
+    val lastHeard: Int = 0, // the last time we've seen this node in secs since 1970
+    val deviceMetrics: DeviceMetrics = DeviceMetrics(),
+    val channel: Int = 0,
+    val viaMqtt: Boolean = false,
+    val hopsAway: Int = -1,
+    val isFavorite: Boolean = false,
+    val isIgnored: Boolean = false,
+    val isMuted: Boolean = false,
+    val environmentMetrics: EnvironmentMetrics = EnvironmentMetrics(),
+    val powerMetrics: PowerMetrics = PowerMetrics(),
+    val airQualityMetrics: AirQualityMetrics = AirQualityMetrics(),
+    val paxcounter: Paxcount = Paxcount(),
+    val publicKey: ByteString? = null,
+    val notes: String = "",
+    /** User-editable labels per power-metrics channel (e.g. "Solar", "Battery"), indexed by channel - 1. */
+    val powerChannelLabels: List<String> = emptyList(),
+    val manuallyVerified: Boolean = false,
+    /** True when this node signs its broadcasts via XEdDSA (NodeInfo.has_xeddsa_signed). Automatic trust. */
+    val signsPackets: Boolean = false,
+    val nodeStatus: String? = null,
+    /** The transport mechanism this node was last heard over (see [MeshPacket.TransportMechanism]). */
+    val lastTransport: Int = 0,
+) {
+    val capabilities: Capabilities by lazy { Capabilities(metadata?.firmware_version) }
+
+    val isOnline: Boolean
+        get() = isOnline(onlineTimeThreshold())
+
+    /** Injectable [threshold] keeps tests deterministic — the property getter re-reads the clock on every access. */
+    internal fun isOnline(threshold: Int): Boolean = lastHeard > threshold
+
+    val colors: Pair<Int, Int>
+        get() = nodeColorsFromNum(num)
+
+    val isUnknownUser
+        get() = user.hw_model == HardwareModel.UNSET
+
+    val hasPKC
+        get() = (publicKey ?: user.public_key).size > 0
+
+    val mismatchKey
+        get() = (publicKey ?: user.public_key) == ERROR_BYTE_STRING
+
+    /**
+     * Last measured SNR in dB, or null when this node has no reading yet ([snr] still holds [SNR_UNSET]).
+     *
+     * Every read of [snr] should go through this: 0 dB is a real, good reading, and the raw sentinel rates as an
+     * *excellent* signal if it reaches the preset-relative quality bands. Threshold comparisons such as `snr < 100f`
+     * are not equivalent — they also discard any genuine reading at or above the threshold.
+     */
+    val snrOrNull: Float?
+        get() = snr.takeIf { it != SNR_UNSET }
+
+    /** Last measured RSSI in dBm, or null when this node has no reading yet. 0 dBm is a real reading. */
+    val rssiOrNull: Int?
+        get() = rssi.takeIf { it != RSSI_UNSET }
+
+    val hasEnvironmentMetrics: Boolean
+        get() = environmentMetrics != EnvironmentMetrics()
+
+    val hasPowerMetrics: Boolean
+        get() = powerMetrics != PowerMetrics()
+
+    val hasAirQualityMetrics: Boolean
+        get() = airQualityMetrics != AirQualityMetrics()
+
+    val batteryLevel
+        get() = deviceMetrics.battery_level
+
+    val voltage
+        get() = deviceMetrics.voltage
+
+    val batteryStr
+        get() = if ((batteryLevel ?: 0) in 1..100) "$batteryLevel%" else ""
+
+    val latitude
+        get() = (position.latitude_i ?: 0) * 1e-7
+
+    val longitude
+        get() = (position.longitude_i ?: 0) * 1e-7
+
+    private fun hasValidPosition(): Boolean = latitude != 0.0 &&
+        longitude != 0.0 &&
+        (latitude >= -90 && latitude <= 90.0) &&
+        (longitude >= -180 && longitude <= 180)
+
+    val validPosition: Position?
+        get() = position.takeIf { hasValidPosition() }
+
+    // @return distance in meters to some other node (or null if unknown)
+    fun distance(o: Node): Int? = when {
+        validPosition == null || o.validPosition == null -> null
+        else -> latLongToMeter(latitude, longitude, o.latitude, o.longitude).toInt()
+    }
+
+    // @return formatted distance string to another node, using the given display units
+    fun distanceStr(o: Node, displayUnits: MeasurementSystem): String? = distance(o)?.toDistanceString(displayUnits)
+
+    // @return bearing to the other position in degrees
+    fun bearing(o: Node?): Int? = when {
+        validPosition == null || o?.validPosition == null -> null
+        else -> bearing(latitude, longitude, o.latitude, o.longitude).toInt()
+    }
+
+    fun gpsString(): String = GPSFormat.toDec(latitude, longitude)
+
+    private fun EnvironmentMetrics.getDisplayStrings(isFahrenheit: Boolean): List<String> {
+        // These fields carry presence: `null` means "no sensor", so 0 °C / 0 V / 0 A / 0% are real readings and must
+        // still render. Humidity keeps its zero-guard because 0% RH is not physically reachable.
+        val temp = temperature?.let { MetricFormatter.temperature(it, isFahrenheit) }
+        val humidity = if ((relative_humidity ?: 0f) != 0f) MetricFormatter.humidity(relative_humidity ?: 0f) else null
+        val soilTemperatureStr = soil_temperature?.let { MetricFormatter.temperature(it, isFahrenheit) }
+        val soilMoistureRange = 0..100
+        val soilMoisture = soil_moisture?.takeIf { it in soilMoistureRange }?.let { MetricFormatter.percent(it) }
+        val voltage = this.voltage?.let { MetricFormatter.voltage(it) }
+        val current = current?.let { MetricFormatter.current(it) }
+        val iaq = if ((iaq ?: 0) != 0) "IAQ: $iaq" else null
+
+        return listOfNotNull(
+            paxcounter.getDisplayString(),
+            temp,
+            humidity,
+            soilTemperatureStr,
+            soilMoisture,
+            voltage,
+            current,
+            iaq,
+        )
+    }
+
+    private fun Paxcount.getDisplayString() = "PAX: ${ble + wifi} (B:$ble/W:$wifi)".takeIf { ble != 0 || wifi != 0 }
+
+    fun getTelemetryStrings(isFahrenheit: Boolean = false): List<String> =
+        environmentMetrics.getDisplayStrings(isFahrenheit)
+
+    companion object {
+        private const val DEFAULT_ID_SUFFIX_LENGTH = 4
+        private const val RELAY_NODE_SUFFIX_MASK = 0xFF
+
+        /** Size (in bytes) of a Curve25519 public key as used by meshtastic firmware. */
+        const val PUBLIC_KEY_SIZE: Int = 32
+
+        /**
+         * Sentinels stored when a node has no radio-metric reading. They exist because [snr]/[rssi] are not nullable
+         * (the Room columns behind them are NOT NULL); resolve them with [snrOrNull]/[rssiOrNull] rather than comparing
+         * against them at call sites.
+         */
+        const val SNR_UNSET: Float = Float.MAX_VALUE
+        const val RSSI_UNSET: Int = Int.MAX_VALUE
+
+        val ERROR_BYTE_STRING: ByteString = ByteArray(PUBLIC_KEY_SIZE) { 0 }.toByteString()
+
+        fun getRelayNode(relayNodeId: Int, nodes: List<Node>, ourNodeNum: Int?): Node? {
+            val relayNodeIdSuffix = relayNodeId and RELAY_NODE_SUFFIX_MASK
+
+            val candidateRelayNodes =
+                nodes.filter {
+                    it.num != ourNodeNum &&
+                        it.lastHeard != 0 &&
+                        (it.num and RELAY_NODE_SUFFIX_MASK) == relayNodeIdSuffix
+                }
+
+            val closestRelayNode =
+                if (candidateRelayNodes.size == 1) {
+                    candidateRelayNodes.first()
+                } else {
+                    candidateRelayNodes.minByOrNull { it.hopsAway }
+                }
+
+            return closestRelayNode
+        }
+
+        /** Creates a fallback [Node] when the node is not found in the database. */
+        fun createFallback(nodeNum: Int, fallbackNamePrefix: String): Node {
+            val userId = NodeAddress.numToDefaultId(nodeNum)
+            val safeUserId = userId.padStart(DEFAULT_ID_SUFFIX_LENGTH, '0').takeLast(DEFAULT_ID_SUFFIX_LENGTH)
+            val longName = "$fallbackNamePrefix $safeUserId"
+            val defaultUser =
+                User(id = userId, long_name = longName, short_name = safeUserId, hw_model = HardwareModel.UNSET)
+            return Node(num = nodeNum, user = defaultUser)
+        }
+    }
+}
+
+fun Config.DeviceConfig.Role?.isUnmessageableRole(): Boolean = this in
+    listOf(
+        Config.DeviceConfig.Role.REPEATER,
+        Config.DeviceConfig.Role.ROUTER,
+        Config.DeviceConfig.Role.ROUTER_LATE,
+        Config.DeviceConfig.Role.SENSOR,
+        Config.DeviceConfig.Role.TRACKER,
+        Config.DeviceConfig.Role.TAK_TRACKER,
+    )
+
+/** Offset converting a negative [Node.num] into its unsigned 32-bit decimal representation. */
+private const val UNSIGNED_INT_OFFSET = 4294967296L
+
+private val Node.unsignedNum: Long
+    get() = num.toLong().let { if (it < 0) it + UNSIGNED_INT_OFFSET else it }
+
+/**
+ * Matches node search text (long/short name, hex id, decimal id) with Unicode-aware case folding.
+ *
+ * Must run in Kotlin, not SQL: SQLite's LIKE/UPPER/LOWER only case-fold ASCII a-z/A-Z, so a query like "kolså" can
+ * never match a stored name of "KOLSÅS" via a SQL WHERE clause (#6750).
+ */
+fun Node.matchesSearch(filter: String): Boolean = filter.isBlank() ||
+    user.long_name.contains(filter, ignoreCase = true) ||
+    user.short_name.contains(filter, ignoreCase = true) ||
+    user.id.contains(filter, ignoreCase = true) ||
+    unsignedNum.toString().contains(filter, ignoreCase = true)

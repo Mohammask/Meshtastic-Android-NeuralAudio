@@ -1,0 +1,652 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+@file:Suppress("MagicNumber")
+
+package org.meshtastic.feature.firmware
+
+import kotlinx.coroutines.test.runTest
+import org.meshtastic.core.common.util.CommonUri
+import org.meshtastic.core.database.entity.FirmwareRelease
+import org.meshtastic.core.database.entity.FirmwareReleaseType
+import org.meshtastic.core.model.DeviceHardware
+import org.meshtastic.feature.firmware.ota.FirmwareHashUtil
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * Tests for [FirmwareRetriever] covering the manifest-first ESP32 firmware resolution strategy and fallback heuristics.
+ * Uses [FakeFirmwareFileHandler] instead of MockK for KMP compatibility.
+ *
+ * This class is `abstract` because the Android `actual` of [CommonUri.parse] delegates to `android.net.Uri.parse()`,
+ * which requires Robolectric on the Android host-test target. Platform-specific subclasses in `androidHostTest` and
+ * `jvmTest` apply the necessary runner configuration.
+ */
+abstract class CommonFirmwareRetrieverTest {
+
+    protected companion object {
+        const val BASE_URL = "https://raw.githubusercontent.com/meshtastic/meshtastic.github.io/master"
+
+        val TEST_RELEASE = FirmwareRelease(id = "v2.7.17", zipUrl = "https://example.com/esp32-s3.zip")
+
+        val TEST_HARDWARE =
+            DeviceHardware(hwModelSlug = "HELTEC_V3", platformioTarget = "heltec-v3", architecture = "esp32-s3")
+
+        /** A valid .mt.json manifest with an app0 entry. */
+        val MANIFEST_JSON =
+            """
+            {
+                "files": [
+                    {
+                        "name": "firmware-heltec-v3-2.7.17.bin",
+                        "md5": "abc123",
+                        "bytes": 2097152,
+                        "part_name": "app0"
+                    },
+                    {
+                        "name": "firmware-heltec-v3-2.7.17.factory.bin",
+                        "md5": "def456",
+                        "bytes": 4194304,
+                        "part_name": "factory"
+                    }
+                ]
+            }
+            """
+                .trimIndent()
+    }
+
+    // -----------------------------------------------------------------------
+    // ESP32 manifest-first resolution
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `retrieveEsp32Firmware uses manifest when available`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // Manifest is available
+        handler.textResponses["$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.mt.json"] = MANIFEST_JSON
+
+        // Direct download of the manifest-resolved filename succeeds
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Should resolve firmware via manifest")
+        assertEquals("firmware-heltec-v3-2.7.17.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware accepts manifest artifact when md5 and size match`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // Distinctive app0 name no fallback heuristic would construct, so resolving it proves the verified manifest
+        // path returned the artifact (rather than a filename-heuristic fallback that happens to share the name).
+        val name = "firmware-heltec-v3-2.7.17-app0.bin"
+        val payload = ByteArray(2048) { it.toByte() }
+        val md5 = FirmwareHashUtil.calculateMd5Hex(payload)
+        handler.textResponses["$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.mt.json"] =
+            """{"files":[{"name":"$name","part_name":"app0","md5":"$md5","bytes":${payload.size}}]}"""
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/$name")
+        handler.fileBytes[name] = payload
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Manifest artifact passing the md5+size check should resolve")
+        assertEquals(name, result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware rejects manifest artifact on md5 mismatch and falls back`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        val name = "firmware-heltec-v3-2.7.17-app0.bin"
+        // Size matches (4) so md5 is computed; the manifest md5 is wrong, so the artifact must be rejected.
+        handler.textResponses["$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.mt.json"] =
+            """{"files":[{"name":"$name","part_name":"app0","md5":"deadbeef","bytes":4}]}"""
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/$name")
+        handler.fileBytes[name] = byteArrayOf(0x01, 0x02, 0x03, 0x04)
+        // Heuristic fallback the rejection should land on.
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result)
+        assertEquals("firmware-heltec-v3-2.7.17.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware rejects manifest artifact on size mismatch and falls back`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        val name = "firmware-heltec-v3-2.7.17-app0.bin"
+        // Blank md5 → only size is checked; the declared size disagrees with the download, so it must be rejected.
+        handler.textResponses["$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.mt.json"] =
+            """{"files":[{"name":"$name","part_name":"app0","md5":"","bytes":9999}]}"""
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/$name")
+        handler.fileBytes[name] = ByteArray(10)
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result)
+        assertEquals("firmware-heltec-v3-2.7.17.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware falls back to current naming when manifest unavailable`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // No manifest
+        // Current naming direct download succeeds
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Should resolve firmware via current naming fallback")
+        assertEquals("firmware-heltec-v3-2.7.17.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware resolves update bin when no manifest and no plain bin`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // No manifest, no plain .bin; only the bare app `-update.bin` is published.
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17-update.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Should resolve firmware via -update.bin")
+        assertEquals("firmware-heltec-v3-2.7.17-update.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware prefers update bin over plain bin when both exist`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // No manifest. Both files exist: on pre-2.7.17 releases the plain `.bin` is a *merged* bootloader+app image
+        // (which esp_ota_end rejects when flashed to app0), while `-update.bin` is the bare app image. Confirmed on
+        // hardware with 2.7.15: the merged image failed `OTA End`, the -update.bin app image is the OTA-able one.
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17-update.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result)
+        assertEquals("firmware-heltec-v3-2.7.17-update.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware falls back to zip extraction when all direct downloads fail`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // No manifest, no direct downloads succeed
+        // Zip download succeeds and extraction finds a matching file
+        handler.zipDownloadResult =
+            FirmwareArtifact(
+                uri = CommonUri.parse("file:///tmp/firmware_release.zip"),
+                fileName = "firmware_release.zip",
+                isTemporary = true,
+            )
+        handler.zipExtractionResult =
+            FirmwareArtifact(
+                uri = CommonUri.parse("file:///tmp/firmware-heltec-v3-2.7.17.bin"),
+                fileName = "firmware-heltec-v3-2.7.17.bin",
+                isTemporary = true,
+            )
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Should resolve firmware via zip fallback")
+        assertTrue(
+            handler.downloadedUrls.any { it.contains("firmware_release.zip") || it.contains(".zip") },
+            "Should have attempted zip download",
+        )
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware returns null when the zip download throws`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // No manifest, no direct downloads; the zip fallback fails with a transient network error
+        handler.zipDownloadException = IllegalStateException("connection reset")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNull(result, "A failed zip download must resolve to null, not propagate")
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware returns null when all strategies fail`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // Everything fails — no manifest, no direct downloads, no zip
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNull(result, "Should return null when all strategies fail")
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware skips manifest when JSON is malformed`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // Malformed manifest
+        handler.textResponses["$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.mt.json"] = "{ not valid json }"
+
+        // Current naming succeeds
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Should fall through to current naming when manifest is malformed")
+        assertEquals("firmware-heltec-v3-2.7.17.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware skips manifest when no app0 entry`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        // Manifest with no app0 entry
+        handler.textResponses["$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.mt.json"] =
+            """{"files": [{"name": "bootloader.bin", "md5": "abc", "bytes": 1024, "part_name": "bootloader"}]}"""
+
+        // Current naming succeeds
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Should fall through when manifest has no app0 entry")
+        assertEquals("firmware-heltec-v3-2.7.17.bin", result.fileName)
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware strips v prefix from version for URLs`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        // The manifest URL should use "2.7.17" not "v2.7.17"
+        val manifestFetchUrl = handler.fetchedTextUrls.firstOrNull()
+        if (manifestFetchUrl != null) {
+            assertTrue("v2.7.17" !in manifestFetchUrl, "Manifest URL should not contain 'v' prefix: $manifestFetchUrl")
+        }
+
+        // checkUrlExists calls should use bare version
+        handler.checkedUrls.forEach { url ->
+            assertTrue("firmware-v2.7.17" !in url, "URL should not contain 'v' prefix in firmware path: $url")
+        }
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware uses platformioTarget over hwModelSlug`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-heltec-v3-2.7.17.bin")
+
+        retriever.retrieveEsp32Firmware(TEST_RELEASE, TEST_HARDWARE) {}
+
+        // All URLs should use "heltec-v3" (platformioTarget) not "HELTEC_V3" (hwModelSlug)
+        val allUrls = handler.checkedUrls + handler.fetchedTextUrls + handler.downloadedUrls
+        allUrls.forEach { url ->
+            assertTrue("HELTEC_V3" !in url, "URL should use platformioTarget, not hwModelSlug: $url")
+        }
+    }
+
+    @Test
+    fun `retrieveEsp32Firmware uses hwModelSlug when platformioTarget is empty`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val hardware = TEST_HARDWARE.copy(platformioTarget = "", hwModelSlug = "CUSTOM_BOARD")
+
+        handler.existingUrls.add("$BASE_URL/firmware-2.7.17/firmware-CUSTOM_BOARD-2.7.17.bin")
+
+        val result = retriever.retrieveEsp32Firmware(TEST_RELEASE, hardware) {}
+
+        assertNotNull(result, "Should resolve using hwModelSlug fallback")
+        assertEquals("firmware-CUSTOM_BOARD-2.7.17.bin", result.fileName)
+    }
+
+    // -----------------------------------------------------------------------
+    // Nightly channel (fixed firmware-nightly/ folder, no release zip)
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `nightly release resolves from the fixed firmware-nightly folder`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val nightly = FirmwareRelease(id = "v2.8.0.f52e2ea", zipUrl = "", releaseType = FirmwareReleaseType.NIGHTLY)
+
+        handler.textResponses["$BASE_URL/firmware-nightly/firmware-heltec-v3-2.8.0.f52e2ea.mt.json"] =
+            """{"files":[{"name":"firmware-heltec-v3-2.8.0.f52e2ea.bin","md5":"","bytes":0,"part_name":"app0"}]}"""
+        handler.existingUrls.add("$BASE_URL/firmware-nightly/firmware-heltec-v3-2.8.0.f52e2ea.bin")
+
+        val result = retriever.retrieveEsp32Firmware(nightly, TEST_HARDWARE) {}
+
+        assertNotNull(result, "Nightly should resolve from firmware-nightly/, not firmware-<version>/")
+        assertEquals("firmware-heltec-v3-2.8.0.f52e2ea.bin", result.fileName)
+        assertTrue(handler.checkedUrls.none { "firmware-2.8.0.f52e2ea/" in it }, "versioned folder must not be used")
+        assertTrue(
+            "$BASE_URL/firmware-nightly/firmware-heltec-v3-2.8.0.f52e2ea.mt.json" in handler.fetchedTextUrls,
+            "manifest must be fetched from firmware-nightly/",
+        )
+    }
+
+    @Test
+    fun `nightly ota zip resolves from the fixed firmware-nightly folder`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val hardware = DeviceHardware(hwModelSlug = "RAK4631", platformioTarget = "rak4631", architecture = "nrf52840")
+        val nightly = FirmwareRelease(id = "v2.8.0.f52e2ea", zipUrl = "", releaseType = FirmwareReleaseType.NIGHTLY)
+
+        handler.existingUrls.add("$BASE_URL/firmware-nightly/firmware-rak4631-2.8.0.f52e2ea-ota.zip")
+
+        val result = retriever.retrieveOtaFirmware(nightly, hardware) {}
+
+        assertNotNull(result)
+        assertEquals("firmware-rak4631-2.8.0.f52e2ea-ota.zip", result.fileName)
+    }
+
+    @Test
+    fun `nightly release without zip skips the zip fallback entirely`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val nightly = FirmwareRelease(id = "v2.8.0.f52e2ea", zipUrl = "", releaseType = FirmwareReleaseType.NIGHTLY)
+
+        // Nothing published — every strategy fails.
+        val result = retriever.retrieveEsp32Firmware(nightly, TEST_HARDWARE) {}
+
+        assertNull(result)
+        assertTrue(handler.downloadedUrls.isEmpty(), "no zip download may be attempted when zipUrl is blank")
+    }
+
+    // -----------------------------------------------------------------------
+    // OTA firmware (nRF52 DFU zip)
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `retrieveOtaFirmware constructs correct filename for nRF52`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val hardware = DeviceHardware(hwModelSlug = "RAK4631", platformioTarget = "rak4631", architecture = "nrf52840")
+        val release = FirmwareRelease(id = "v2.5.0", zipUrl = "https://example.com/nrf52.zip")
+
+        handler.existingUrls.add("$BASE_URL/firmware-2.5.0/firmware-rak4631-2.5.0-ota.zip")
+
+        val result = retriever.retrieveOtaFirmware(release, hardware) {}
+
+        assertNotNull(result, "Should resolve OTA firmware for nRF52")
+        assertEquals("firmware-rak4631-2.5.0-ota.zip", result.fileName)
+    }
+
+    @Test
+    fun `retrieveOtaFirmware uses platformioTarget for variant`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val hardware =
+            DeviceHardware(
+                hwModelSlug = "RAK4631",
+                platformioTarget = "rak4631_nomadstar_meteor_pro",
+                architecture = "nrf52840",
+            )
+        val release = FirmwareRelease(id = "v2.5.0", zipUrl = "https://example.com/nrf52.zip")
+
+        handler.existingUrls.add("$BASE_URL/firmware-2.5.0/firmware-rak4631_nomadstar_meteor_pro-2.5.0-ota.zip")
+
+        val result = retriever.retrieveOtaFirmware(release, hardware) {}
+
+        assertNotNull(result, "Should resolve OTA firmware for nRF52 variant")
+        assertEquals("firmware-rak4631_nomadstar_meteor_pro-2.5.0-ota.zip", result.fileName)
+    }
+
+    // -----------------------------------------------------------------------
+    // USB firmware
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `retrieveUsbFirmware constructs correct filename for RP2040`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val hardware = DeviceHardware(hwModelSlug = "RPI_PICO", platformioTarget = "pico", architecture = "rp2040")
+        val release = FirmwareRelease(id = "v2.5.0", zipUrl = "https://example.com/rp2040.zip")
+
+        handler.existingUrls.add("$BASE_URL/firmware-2.5.0/firmware-pico-2.5.0.uf2")
+
+        val result = retriever.retrieveUsbFirmware(release, hardware) {}
+
+        assertNotNull(result, "Should resolve USB firmware for RP2040")
+        assertEquals("firmware-pico-2.5.0.uf2", result.fileName)
+    }
+
+    // -----------------------------------------------------------------------
+    // Pinned maintenance images (factory erase / bootloader upgrade)
+    // -----------------------------------------------------------------------
+
+    /** Builds a single valid UF2 block whose payload target address is [targetAddress]. */
+    private fun uf2Block(targetAddress: Long): ByteArray {
+        val block = ByteArray(UF2_BLOCK_BYTES)
+        fun putLe32(offset: Int, value: Long) {
+            for (i in 0 until 4) {
+                block[offset + i] = ((value shr (8 * i)) and 0xFF).toByte()
+            }
+        }
+        putLe32(0, 0x0A324655L) // magicStart0
+        putLe32(UF2_TARGET_ADDR_OFFSET, targetAddress)
+        return block
+    }
+
+    private fun maintenanceAsset(payload: ByteArray, expectedAddress: Long?) = MaintenanceUf2(
+        url = "https://example.com/uf2/nrf_erase_test.uf2",
+        fileName = "nrf_erase_test.uf2",
+        sha256 = FirmwareHashUtil.bytesToHex(FirmwareHashUtil.calculateSha256Bytes(payload)),
+        expectedFirstTargetAddress = expectedAddress,
+    )
+
+    @Test
+    fun `maintenance uf2 with matching digest and target address is returned`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val payload = uf2Block(0x27000L)
+        val asset = maintenanceAsset(payload, 0x27000L)
+        handler.existingUrls.add(asset.url)
+        handler.fileBytes[asset.fileName] = payload
+
+        val result = retriever.retrieveMaintenanceUf2(asset) {}
+
+        assertNotNull(result, "A verified maintenance image should be returned")
+        assertEquals(asset.fileName, result.fileName)
+        assertTrue(handler.deletedFiles.isEmpty(), "A verified image must not be deleted")
+    }
+
+    @Test
+    fun `maintenance uf2 digest mismatch is terminal and deletes the download`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val payload = uf2Block(0x27000L)
+        val asset = maintenanceAsset(payload, 0x27000L).copy(sha256 = "00".repeat(32))
+        handler.existingUrls.add(asset.url)
+        handler.fileBytes[asset.fileName] = payload
+
+        val result = retriever.retrieveMaintenanceUf2(asset) {}
+
+        assertNull(result, "A digest mismatch must not yield an artifact")
+        assertEquals(1, handler.deletedFiles.size, "The rejected download must be deleted")
+    }
+
+    @Test
+    fun `maintenance uf2 with wrong target address is rejected even when the digest matches`() = runTest {
+        // A swapped URL/digest row: the file is intact and matches its own digest, but it is linked for the other
+        // SoftDevice. Writing it would erase a SoftDevice page.
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val payload = uf2Block(0x26000L)
+        val asset = maintenanceAsset(payload, 0x27000L)
+        handler.existingUrls.add(asset.url)
+        handler.fileBytes[asset.fileName] = payload
+
+        val result = retriever.retrieveMaintenanceUf2(asset) {}
+
+        assertNull(result, "A target-address mismatch must not yield an artifact")
+        assertEquals(1, handler.deletedFiles.size, "The rejected download must be deleted")
+    }
+
+    @Test
+    fun `maintenance uf2 skips the address check when the asset declares no expected address`() = runTest {
+        val handler = FakeFirmwareFileHandler()
+        val retriever = FirmwareRetriever(handler)
+        val payload = uf2Block(0x10000000L)
+        val asset = maintenanceAsset(payload, expectedAddress = null)
+        handler.existingUrls.add(asset.url)
+        handler.fileBytes[asset.fileName] = payload
+
+        assertNotNull(retriever.retrieveMaintenanceUf2(asset) {}, "No expected address means no address check")
+    }
+
+    // -----------------------------------------------------------------------
+    // Test infrastructure
+    // -----------------------------------------------------------------------
+
+    /**
+     * A fake [FirmwareFileHandler] for testing [FirmwareRetriever] without network or filesystem.
+     *
+     * Configure behavior by populating:
+     * - [existingUrls] — URLs that [checkUrlExists] returns true for
+     * - [textResponses] — URL → text body for [fetchText]
+     * - [zipDownloadResult] / [zipExtractionResult] — for zip fallback path
+     */
+    protected class FakeFirmwareFileHandler : FirmwareFileHandler {
+        /** URLs that [checkUrlExists] will return true for. */
+        val existingUrls = mutableSetOf<String>()
+
+        /** URL → text body for [fetchText]. */
+        val textResponses = mutableMapOf<String, String>()
+
+        /** Result returned by [downloadFile] when the filename is "firmware_release.zip". */
+        var zipDownloadResult: FirmwareArtifact? = null
+
+        /** When set, [downloadFile] throws this for the "firmware_release.zip" download instead of returning. */
+        var zipDownloadException: Exception? = null
+
+        /** Result returned by [extractFirmwareFromZip]. */
+        var zipExtractionResult: FirmwareArtifact? = null
+
+        /** Bytes (and thus size) reported by [readBytes] / [getFileSize] for a downloaded file, keyed by fileName. */
+        val fileBytes = mutableMapOf<String, ByteArray>()
+
+        // Tracking
+        val checkedUrls = mutableListOf<String>()
+        val fetchedTextUrls = mutableListOf<String>()
+        val downloadedUrls = mutableListOf<String>()
+
+        override fun cleanupAllTemporaryFiles() {}
+
+        override suspend fun checkUrlExists(url: String): Boolean {
+            checkedUrls.add(url)
+            return url in existingUrls
+        }
+
+        override suspend fun fetchText(url: String): String? {
+            fetchedTextUrls.add(url)
+            return textResponses[url]
+        }
+
+        override suspend fun downloadFile(
+            url: String,
+            fileName: String,
+            onProgress: (Float) -> Unit,
+        ): FirmwareArtifact? {
+            downloadedUrls.add(url)
+            onProgress(1f)
+
+            // Zip download path
+            if (fileName == "firmware_release.zip") {
+                zipDownloadException?.let { throw it }
+                return zipDownloadResult
+            }
+
+            // Direct download: only succeed if the URL was registered as existing
+            return if (url in existingUrls) {
+                FirmwareArtifact(
+                    uri = CommonUri.parse("file:///tmp/$fileName"),
+                    fileName = fileName,
+                    isTemporary = true,
+                )
+            } else {
+                null
+            }
+        }
+
+        override suspend fun extractFirmware(
+            uri: CommonUri,
+            hardware: DeviceHardware,
+            fileExtension: String,
+            preferredFilename: String?,
+        ): FirmwareArtifact? = null
+
+        override suspend fun extractFirmwareFromZip(
+            zipFile: FirmwareArtifact,
+            hardware: DeviceHardware,
+            fileExtension: String,
+            preferredFilename: String?,
+        ): FirmwareArtifact? = zipExtractionResult
+
+        override suspend fun getFileSize(file: FirmwareArtifact): Long = (fileBytes[file.fileName]?.size ?: 0).toLong()
+
+        override suspend fun readBytes(artifact: FirmwareArtifact): ByteArray =
+            fileBytes[artifact.fileName] ?: ByteArray(0)
+
+        override suspend fun importFromUri(uri: CommonUri): FirmwareArtifact? = null
+
+        override suspend fun getDisplayName(uri: CommonUri): String? = uri.pathSegments.lastOrNull()
+
+        override suspend fun extractZipEntries(artifact: FirmwareArtifact): Map<String, ByteArray> = emptyMap()
+
+        /** Artifacts passed to [deleteFile], so verification-failure paths can assert cleanup happened. */
+        val deletedFiles = mutableListOf<FirmwareArtifact>()
+
+        override suspend fun deleteFile(file: FirmwareArtifact) {
+            deletedFiles.add(file)
+        }
+
+        override suspend fun copyToUri(source: FirmwareArtifact, destinationUri: CommonUri): Long = 0L
+
+        override suspend fun isRemovableDestination(destinationUri: CommonUri): Boolean = true
+
+        override suspend fun isDestinationReadable(destinationUri: CommonUri): Boolean = false
+
+        override suspend fun readSiblingText(treeUri: CommonUri, fileName: String): String? = null
+
+        override suspend fun createDocumentInTree(treeUri: CommonUri, fileName: String, mimeType: String): CommonUri? =
+            null
+    }
+}

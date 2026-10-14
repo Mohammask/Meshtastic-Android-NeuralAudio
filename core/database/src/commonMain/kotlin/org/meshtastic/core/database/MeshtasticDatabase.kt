@@ -1,0 +1,249 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.core.database
+
+import androidx.room3.AutoMigration
+import androidx.room3.ColumnTypeConverters
+import androidx.room3.Database
+import androidx.room3.DeleteColumn
+import androidx.room3.DeleteTable
+import androidx.room3.RoomDatabase
+import androidx.room3.migration.AutoMigrationSpec
+import androidx.room3.migration.Migration
+import androidx.sqlite.SQLiteConnection
+import androidx.sqlite.execSQL
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import org.meshtastic.core.common.util.ioDispatcher
+import org.meshtastic.core.database.dao.BootloaderOtaQuirksDao
+import org.meshtastic.core.database.dao.ChannelSetDao
+import org.meshtastic.core.database.dao.DeviceHardwareDao
+import org.meshtastic.core.database.dao.DeviceLinkDao
+import org.meshtastic.core.database.dao.DiscoveryDao
+import org.meshtastic.core.database.dao.EventFirmwareEditionDao
+import org.meshtastic.core.database.dao.FirmwareReleaseDao
+import org.meshtastic.core.database.dao.MaintenanceUf2Dao
+import org.meshtastic.core.database.dao.MergeMarkerDao
+import org.meshtastic.core.database.dao.MeshLogDao
+import org.meshtastic.core.database.dao.NodeInfoDao
+import org.meshtastic.core.database.dao.PacketDao
+import org.meshtastic.core.database.dao.QuickChatActionDao
+import org.meshtastic.core.database.dao.TracerouteNodePositionDao
+import org.meshtastic.core.database.entity.BootloaderOtaQuirksCacheEntity
+import org.meshtastic.core.database.entity.ChannelSetEntity
+import org.meshtastic.core.database.entity.ContactSettings
+import org.meshtastic.core.database.entity.DeviceHardwareEntity
+import org.meshtastic.core.database.entity.DeviceLinkEntity
+import org.meshtastic.core.database.entity.DiscoveredNodeEntity
+import org.meshtastic.core.database.entity.DiscoveryPresetResultEntity
+import org.meshtastic.core.database.entity.DiscoverySessionEntity
+import org.meshtastic.core.database.entity.EventFirmwareEditionEntity
+import org.meshtastic.core.database.entity.FirmwareReleaseEntity
+import org.meshtastic.core.database.entity.MaintenanceUf2CacheEntity
+import org.meshtastic.core.database.entity.MergeMarkerEntity
+import org.meshtastic.core.database.entity.MeshLog
+import org.meshtastic.core.database.entity.MetadataEntity
+import org.meshtastic.core.database.entity.MyNodeEntity
+import org.meshtastic.core.database.entity.NodeEntity
+import org.meshtastic.core.database.entity.Packet
+import org.meshtastic.core.database.entity.PacketFts
+import org.meshtastic.core.database.entity.QuickChatAction
+import org.meshtastic.core.database.entity.ReactionEntity
+import org.meshtastic.core.database.entity.TracerouteNodePositionEntity
+
+@Database(
+    entities =
+    [
+        MyNodeEntity::class,
+        NodeEntity::class,
+        Packet::class,
+        PacketFts::class,
+        ContactSettings::class,
+        MeshLog::class,
+        QuickChatAction::class,
+        ReactionEntity::class,
+        MetadataEntity::class,
+        DeviceHardwareEntity::class,
+        DeviceLinkEntity::class,
+        FirmwareReleaseEntity::class,
+        TracerouteNodePositionEntity::class,
+        DiscoverySessionEntity::class,
+        DiscoveryPresetResultEntity::class,
+        DiscoveredNodeEntity::class,
+        EventFirmwareEditionEntity::class,
+        MergeMarkerEntity::class,
+        ChannelSetEntity::class,
+        BootloaderOtaQuirksCacheEntity::class,
+        MaintenanceUf2CacheEntity::class,
+    ],
+    autoMigrations =
+    [
+        AutoMigration(from = 3, to = 4),
+        AutoMigration(from = 4, to = 5),
+        AutoMigration(from = 5, to = 6),
+        AutoMigration(from = 6, to = 7),
+        AutoMigration(from = 7, to = 8),
+        AutoMigration(from = 8, to = 9),
+        AutoMigration(from = 9, to = 10),
+        AutoMigration(from = 10, to = 11),
+        AutoMigration(from = 11, to = 12),
+        AutoMigration(from = 12, to = 13, spec = AutoMigration12to13::class),
+        AutoMigration(from = 13, to = 14),
+        AutoMigration(from = 14, to = 15),
+        AutoMigration(from = 15, to = 16),
+        AutoMigration(from = 16, to = 17),
+        AutoMigration(from = 17, to = 18),
+        AutoMigration(from = 18, to = 19),
+        AutoMigration(from = 19, to = 20),
+        AutoMigration(from = 20, to = 21),
+        AutoMigration(from = 21, to = 22),
+        AutoMigration(from = 22, to = 23),
+        AutoMigration(from = 23, to = 24),
+        AutoMigration(from = 24, to = 25),
+        AutoMigration(from = 25, to = 26),
+        AutoMigration(from = 26, to = 27),
+        AutoMigration(from = 27, to = 28),
+        AutoMigration(from = 28, to = 29),
+        AutoMigration(from = 29, to = 30, spec = AutoMigration29to30::class),
+        AutoMigration(from = 30, to = 31),
+        AutoMigration(from = 31, to = 32),
+        AutoMigration(from = 32, to = 33),
+        AutoMigration(from = 33, to = 34, spec = AutoMigration33to34::class),
+        AutoMigration(from = 34, to = 35, spec = AutoMigration34to35::class),
+        AutoMigration(from = 35, to = 36),
+        AutoMigration(from = 36, to = 37),
+        AutoMigration(from = 37, to = 38),
+        AutoMigration(from = 38, to = 39),
+        AutoMigration(from = 39, to = 40),
+        AutoMigration(from = 40, to = 41),
+        AutoMigration(from = 41, to = 42),
+        AutoMigration(from = 42, to = 43, spec = AutoMigration42to43::class),
+        AutoMigration(from = 43, to = 44),
+        AutoMigration(from = 44, to = 45),
+        AutoMigration(from = 45, to = 46),
+        AutoMigration(from = 46, to = 47),
+        AutoMigration(from = 47, to = 48),
+        AutoMigration(from = 48, to = 49),
+        AutoMigration(from = 49, to = 50),
+        AutoMigration(from = 50, to = 51),
+        AutoMigration(from = 51, to = 52),
+        // 52 -> 53 is the manual MIGRATION_52_53 (FTS rebuild), applied via configureCommon().
+        AutoMigration(from = 53, to = 54),
+        AutoMigration(from = 54, to = 55),
+        AutoMigration(from = 55, to = 56),
+        AutoMigration(from = 56, to = 57),
+    ],
+    version = 57,
+    exportSchema = true,
+)
+@androidx.room3.ConstructedBy(MeshtasticDatabaseConstructor::class)
+@ColumnTypeConverters(Converters::class)
+@androidx.room3.DaoReturnTypeConverters(androidx.room3.paging.PagingSourceDaoReturnTypeConverter::class)
+@Suppress("TooManyFunctions") // One accessor per DAO; the count grows with the schema, not with class complexity.
+abstract class MeshtasticDatabase : RoomDatabase() {
+    abstract fun nodeInfoDao(): NodeInfoDao
+
+    abstract fun packetDao(): PacketDao
+
+    abstract fun meshLogDao(): MeshLogDao
+
+    abstract fun quickChatActionDao(): QuickChatActionDao
+
+    abstract fun deviceHardwareDao(): DeviceHardwareDao
+
+    abstract fun deviceLinkDao(): DeviceLinkDao
+
+    abstract fun firmwareReleaseDao(): FirmwareReleaseDao
+
+    abstract fun tracerouteNodePositionDao(): TracerouteNodePositionDao
+
+    abstract fun discoveryDao(): DiscoveryDao
+
+    abstract fun eventFirmwareEditionDao(): EventFirmwareEditionDao
+
+    abstract fun mergeMarkerDao(): MergeMarkerDao
+
+    abstract fun channelSetDao(): ChannelSetDao
+
+    abstract fun bootloaderOtaQuirksDao(): BootloaderOtaQuirksDao
+
+    abstract fun maintenanceUf2Dao(): MaintenanceUf2Dao
+
+    companion object {
+        /**
+         * Rebuilds the `packet_fts` FTS5 index from its external-content table.
+         *
+         * `packet_fts` is an FTS5 external-content table over `packet`, so its shadow tables only stay valid while they
+         * agree with the content table's rowids and text. The 51→52 auto-migration recreates `packet`
+         * (copy/DROP/RENAME), and 2.8.1 (29321949) upgraders stormed SQLITE_CORRUPT_VTAB (267, "database disk image is
+         * malformed") on every subsequent packet write — `clearUnreadCount`, `markAllAsRead`, delete paths — with no
+         * self-heal, because [org.meshtastic.core.database.entity.PacketFts]'s sync triggers surface the desync on each
+         * write instead of repairing it. FTS5's `rebuild` command regenerates the index wholesale from the content
+         * table, so this migration both repairs databases the earlier chain already desynced and re-asserts the
+         * invariant for everyone else. Any future migration that recreates `packet` (Room rebuilds the table for any
+         * nullability or constraint change) must be followed by the same rebuild.
+         */
+        internal val MIGRATION_52_53: Migration =
+            object : Migration(52, 53) {
+                override suspend fun migrate(connection: SQLiteConnection) {
+                    connection.execSQL("INSERT INTO `packet_fts`(`packet_fts`) VALUES('rebuild')")
+                }
+            }
+
+        /**
+         * Configures a [RoomDatabase.Builder] with standard settings for this project.
+         *
+         * All platforms force [setSingleConnectionPool]. Without it, Room defaults to a 4-reader pool for named
+         * databases, and under coroutine cancellation churn (e.g. DB switches via `flatMapLatest`) the reader-pool
+         * permit semaphore can wedge: all reader connections report `Free` but `permits=0`, so every read acquisition
+         * times out indefinitely ("Error code: 5, Timed out attempting to acquire a reader connection"). Android hit
+         * this first; desktop (Flathub, 2026-07-10) reproduced the identical wedge in field logs, so JVM/iOS were moved
+         * off the multi-reader pool too. Single-connection eliminates the separate reader permit pool entirely.
+         *
+         * For in-memory databases (tests) this is a no-op for pooling — Room already serves `name == null` databases
+         * from a single connection — it just serializes the query dispatcher.
+         */
+        @OptIn(ExperimentalCoroutinesApi::class)
+        fun <T : RoomDatabase> RoomDatabase.Builder<T>.configureCommon(): RoomDatabase.Builder<T> =
+            this.fallbackToDestructiveMigration(dropAllTables = false)
+                .addMigrations(MIGRATION_52_53)
+                .setSingleConnectionPool()
+                .setQueryCoroutineContext(
+                    // limitedParallelism(1) has the same throughput ceiling as the single-connection pool
+                    // (already serialized), so this only blocks the cancellation pileup — not real I/O concurrency.
+                    ioDispatcher.limitedParallelism(1),
+                )
+    }
+}
+
+@DeleteTable(tableName = "NodeInfo")
+@DeleteTable(tableName = "MyNodeInfo")
+class AutoMigration12to13 : AutoMigrationSpec
+
+@DeleteColumn(tableName = "packet", columnName = "reply_id")
+class AutoMigration29to30 : AutoMigrationSpec
+
+@DeleteColumn(tableName = "packet", columnName = "retry_count")
+@DeleteColumn(tableName = "reactions", columnName = "retry_count")
+class AutoMigration33to34 : AutoMigrationSpec
+
+@DeleteColumn(tableName = "packet", columnName = "retry_count")
+@DeleteColumn(tableName = "reactions", columnName = "retry_count")
+class AutoMigration34to35 : AutoMigrationSpec
+
+/** Device links moved from the bundled `urls.json` to the resolved API; `original_url` is no longer stored. */
+@DeleteColumn(tableName = "device_link", columnName = "original_url")
+class AutoMigration42to43 : AutoMigrationSpec

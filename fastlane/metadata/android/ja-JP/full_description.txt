@@ -1,0 +1,22 @@
+Meshtasticは、オープンソースのオフグリッドメッシュ無線とAndroidデバイスを連携させるためのソフトです。 このアプリは Meshtastic プロジェクトのメインクライアントであり、メッシュデバイスの管理や他のユーザーとの通信を可能にします。
+
+Meshtastic プロジェクトの詳細については、ぜひ公式ウェブサイトをご覧ください：<a href="https://www.meshtastic.org">meshtastic.org</a>。 無線デバイスのファームウェアは別のオープンソースプロジェクトであり、詳しくはこちらをご覧ください：
+<a href="https://github.com/meshtastic/Meshtastic-device">https://github.com/meshtastic/Meshtastic-device</a>。
+
+<b>コミュニティとサポート</b>
+
+当プロジェクトは、現時点でベータ版です。 皆様からのフィードバックをお待ちしております！ ご質問・フィードバック・問題がある場合は、フレンドリーで活発なコミュニティにぜひご参加ください：
+
+• <b>ディスカッションフォーラム：</b> <a href="https://github.com/orgs/meshtastic/discussions">https://github.com/orgs/meshtastic/discussions</a>
+• <b>Discord：</b> <a href="https://discord.gg/meshtastic">https://discord.gg/meshtastic</a>
+• <b>問題を報告：</b> <a href="https://github.com/meshtastic/Meshtastic-Android/issues">https://github.com/meshtastic/Meshtastic-Android/issues</a>
+
+<b>ドキュメント</b>
+
+このアプリと Meshtastic の機能と性能について詳しく知りたい場合は、ぜひ公式ドキュメントをご覧ください：
+<a href="https://meshtastic.org/docs/">ドキュメントを見る</a>
+
+<b>翻訳</b>
+
+Crowdin を使って、アプリの母国語への翻訳に協力できます：
+<a href="https://crowdin.meshtastic.org/android">https://crowdin.meshtastic.org/android</a>

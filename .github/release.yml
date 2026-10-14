@@ -1,0 +1,38 @@
+# .github/release.yml - GitHub Release Notes Configuration
+#
+# Labels here must match actual repo labels. Run `gh label list` to verify.
+# Auto-labeler: .github/workflows/pull-request-target.yml
+
+changelog:
+  exclude:
+    labels:
+      - dependencies
+      - automation
+      - release
+      - repo
+      - skip-changelog
+      - chore
+      - ci
+      - build
+      - testing
+      - documentation
+      - l10n
+    authors:
+      - renovate[bot]
+      - dependabot[bot]
+      - github-actions[bot]
+
+  categories:
+    - title: 🏗️ Features
+      labels:
+        - enhancement
+    - title: 🖥️ Desktop
+      labels:
+        - desktop
+    - title: 🛠️ Fixes
+      labels:
+        - bug
+        - bugfix
+    - title: 📝 Other Changes
+      labels:
+        - '*'

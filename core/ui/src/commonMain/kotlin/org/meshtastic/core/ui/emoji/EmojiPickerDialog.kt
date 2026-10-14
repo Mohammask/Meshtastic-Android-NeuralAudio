@@ -1,0 +1,884 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+@file:Suppress("TooManyFunctions")
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package org.meshtastic.core.ui.emoji
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.max
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import kotlinx.coroutines.delay
+import org.jetbrains.compose.resources.stringResource
+import org.koin.compose.viewmodel.koinViewModel
+import org.meshtastic.core.resources.Res
+import org.meshtastic.core.resources.clear
+import org.meshtastic.core.resources.emoji_category_activities
+import org.meshtastic.core.resources.emoji_category_animals_nature
+import org.meshtastic.core.resources.emoji_category_flags
+import org.meshtastic.core.resources.emoji_category_food_drink
+import org.meshtastic.core.resources.emoji_category_objects
+import org.meshtastic.core.resources.emoji_category_people_body
+import org.meshtastic.core.resources.emoji_category_smileys_emotion
+import org.meshtastic.core.resources.emoji_category_symbols
+import org.meshtastic.core.resources.emoji_category_travel_places
+import org.meshtastic.core.resources.emoji_load_error
+import org.meshtastic.core.resources.emoji_no_results
+import org.meshtastic.core.resources.emoji_recently_used
+import org.meshtastic.core.resources.search_emoji
+import org.meshtastic.core.ui.icon.Close
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.icon.Search
+import org.meshtastic.core.ui.theme.AppTheme
+
+// ── Constants ──────────────────────────────────────────────────────────────────
+
+private val GRID_MIN_CELL_SIZE = 44.dp
+private const val EMOJI_FONT_SIZE = 24
+private val CELL_CONTENT_PADDING = 12.dp
+private val SKIN_TONE_CELL_MIN_SIZE = 44.dp
+private const val SKIN_TONE_FONT_SIZE = 22
+
+/** Wide enough for all six [SkinTone] variants at [SKIN_TONE_CELL_MIN_SIZE]; wider scales wrap instead. */
+private val SKIN_TONE_POPUP_MAX_WIDTH = 300.dp
+private const val CATEGORY_HEADER_KEY_PREFIX = "header_"
+private const val RECENTS_HEADER_KEY = "header_recents"
+private const val RECENTS_KEY_PREFIX = "recent_"
+private const val MAX_RECENTS = 30
+private const val DEFAULT_QUICK_REACTION_COUNT = 6
+private const val SEARCH_DEBOUNCE_MS = 150L
+
+/** Default quick-reaction emoji used when the user has no recents. */
+private val DEFAULT_QUICK_REACTIONS = listOf("👍", "❤️", "😂", "😮", "😢", "🙏")
+
+// ── Public API ─────────────────────────────────────────────────────────────────
+
+/**
+ * A fully-featured, cross-platform emoji picker dialog.
+ *
+ * Features:
+ * - **9 categories** with tab-strip navigation
+ * - **Recents** — most-frequently-used emojis, persisted via [EmojiPickerViewModel]
+ * - **Search** — filters the full catalog by keyword
+ * - **Per-emoji skin-tone popup** — long-press on a skin-tone-capable emoji to choose a variant
+ * - **Selected-emoji highlighting** — visually marks already-applied reactions
+ * - **Responsive grid** — adapts column count to screen width (phones ≈ 8, desktop ≈ 12+)
+ *
+ * @param selectedEmojis Set of emoji strings already selected (e.g. applied reactions). Matched emojis are highlighted
+ *   with a tinted background.
+ */
+@Composable
+fun EmojiPickerDialog(
+    onDismiss: () -> Unit = {},
+    selectedEmojis: Set<String> = emptySet(),
+    onConfirm: (String) -> Unit,
+) {
+    val viewModel: EmojiPickerViewModel = koinViewModel()
+    val isLoaded by viewModel.isLoaded.collectAsState()
+    val loadError by viewModel.loadError.collectAsState()
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
+    var selectedCategoryIndex by rememberSaveable { mutableStateOf(0) }
+    val preferredSkinToneIndex by viewModel.preferredSkinToneIndex.collectAsState()
+
+    // Debounce search input to avoid per-keystroke filtering of 1870 emojis
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isBlank()) {
+            debouncedQuery = ""
+        } else {
+            delay(SEARCH_DEBOUNCE_MS)
+            debouncedQuery = searchQuery
+        }
+    }
+
+    val recentEmojis by
+        remember(viewModel.customEmojiFrequency) { derivedStateOf { parseRecents(viewModel.customEmojiFrequency) } }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState =
+        rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        ),
+    ) {
+        if (loadError) {
+            Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    text = stringResource(Res.string.emoji_load_error),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else if (isLoaded) {
+            EmojiPickerContent(
+                searchQuery = searchQuery,
+                debouncedQuery = debouncedQuery,
+                onSearchQueryChange = { searchQuery = it },
+                selectedCategoryIndex = selectedCategoryIndex,
+                onCategorySelected = { selectedCategoryIndex = it },
+                selectedEmojis = selectedEmojis,
+                recentEmojis = recentEmojis,
+                categories = viewModel.categories,
+                allEmojis = viewModel.allEmojis,
+                preferredSkinToneIndex = preferredSkinToneIndex,
+                onSkinToneSelect = { viewModel.setPreferredSkinTone(it) },
+                onEmojiSelected = { emoji ->
+                    recordSelection(emoji, viewModel)
+                    onDismiss()
+                    onConfirm(emoji)
+                },
+            )
+        } else {
+            Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+    }
+}
+
+/**
+ * Returns the user's top quick-reaction emoji from recents, falling back to defaults.
+ *
+ * Call sites (e.g. message long-press menus) can use this to populate a dynamic quick-reaction row sourced from the
+ * user's actual usage patterns.
+ */
+@Composable
+fun rememberQuickReactions(count: Int = DEFAULT_QUICK_REACTION_COUNT): List<String> {
+    val viewModel: EmojiPickerViewModel = koinViewModel()
+    val recents by
+        remember(viewModel.customEmojiFrequency) { derivedStateOf { parseRecents(viewModel.customEmojiFrequency) } }
+    return remember(recents) {
+        if (recents.size >= count) {
+            recents.take(count)
+        } else {
+            // Pad with defaults that aren't already in recents
+            val padded = recents.toMutableList()
+            for (default in DEFAULT_QUICK_REACTIONS) {
+                if (padded.size >= count) break
+                if (default !in padded) padded.add(default)
+            }
+            padded.take(count)
+        }
+    }
+}
+
+// ── Main Content ───────────────────────────────────────────────────────────────
+
+@Composable
+@Suppress("LongParameterList")
+private fun EmojiPickerContent(
+    searchQuery: String,
+    debouncedQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    selectedCategoryIndex: Int,
+    onCategorySelected: (Int) -> Unit,
+    selectedEmojis: Set<String>,
+    recentEmojis: List<String>,
+    categories: List<EmojiCategory>,
+    allEmojis: List<Emoji>,
+    preferredSkinToneIndex: Int,
+    onSkinToneSelect: (Int) -> Unit,
+    onEmojiSelected: (String) -> Unit,
+) {
+    Column {
+        SearchBar(query = searchQuery, onQueryChange = onSearchQueryChange)
+
+        AnimatedVisibility(visible = searchQuery.isBlank(), enter = fadeIn(), exit = fadeOut()) {
+            CategoryTabStrip(
+                selectedIndex = selectedCategoryIndex,
+                onCategorySelected = onCategorySelected,
+                hasRecents = recentEmojis.isNotEmpty(),
+                categories = categories,
+            )
+        }
+
+        EmojiGrid(
+            searchQuery = debouncedQuery,
+            selectedCategoryIndex = selectedCategoryIndex,
+            onCategoryChanged = onCategorySelected,
+            selectedEmojis = selectedEmojis,
+            recentEmojis = recentEmojis,
+            categories = categories,
+            allEmojis = allEmojis,
+            preferredSkinToneIndex = preferredSkinToneIndex,
+            onSkinToneSelect = onSkinToneSelect,
+            onEmojiSelected = onEmojiSelected,
+        )
+    }
+}
+
+// ── Search Bar ─────────────────────────────────────────────────────────────────
+
+@Composable
+private fun SearchBar(query: String, onQueryChange: (String) -> Unit) {
+    TextField(
+        value = query,
+        onValueChange = onQueryChange,
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+        placeholder = {
+            Text(
+                text = stringResource(Res.string.search_emoji),
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        leadingIcon = {
+            Icon(imageVector = MeshtasticIcons.Search, contentDescription = null, modifier = Modifier.size(20.dp))
+        },
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(
+                        imageVector = MeshtasticIcons.Close,
+                        contentDescription = stringResource(Res.string.clear),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(12.dp),
+        colors =
+        TextFieldDefaults.colors(
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+        ),
+        textStyle = MaterialTheme.typography.bodyMedium,
+    )
+}
+
+// ── Category Tabs ──────────────────────────────────────────────────────────────
+
+@Composable
+private fun CategoryTabStrip(
+    selectedIndex: Int,
+    onCategorySelected: (Int) -> Unit,
+    hasRecents: Boolean,
+    categories: List<EmojiCategory>,
+) {
+    val tabOffset = if (hasRecents) 1 else 0
+    val totalTabs = categories.size + tabOffset
+
+    PrimaryScrollableTabRow(
+        selectedTabIndex = selectedIndex,
+        modifier = Modifier.fillMaxWidth(),
+        edgePadding = 4.dp,
+        divider = {},
+        containerColor = Color.Transparent,
+    ) {
+        repeat(totalTabs) { index ->
+            val isRecents = hasRecents && index == 0
+            Tab(
+                selected = selectedIndex == index,
+                onClick = { onCategorySelected(index) },
+                text = {
+                    Text(text = if (isRecents) "\uD83D\uDD50" else categories[index - tabOffset].icon, fontSize = 18.sp)
+                },
+            )
+        }
+    }
+}
+
+// ── Emoji Grid ─────────────────────────────────────────────────────────────────
+
+@Composable
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
+private fun EmojiGrid(
+    searchQuery: String,
+    selectedCategoryIndex: Int,
+    onCategoryChanged: (Int) -> Unit,
+    selectedEmojis: Set<String>,
+    recentEmojis: List<String>,
+    categories: List<EmojiCategory>,
+    allEmojis: List<Emoji>,
+    preferredSkinToneIndex: Int,
+    onSkinToneSelect: (Int) -> Unit,
+    onEmojiSelected: (String) -> Unit,
+) {
+    val gridState = rememberLazyGridState()
+    val hasRecents = recentEmojis.isNotEmpty()
+    val tabOffset = if (hasRecents) 1 else 0
+
+    val gridItems: List<GridItem> =
+        remember(searchQuery, recentEmojis, categories, allEmojis) {
+            buildGridItems(searchQuery, recentEmojis, categories, allEmojis)
+        }
+    var animationTargetIndex by remember { mutableStateOf<Int?>(null) }
+
+    // Scroll to category when tab changes
+    LaunchedEffect(selectedCategoryIndex) {
+        if (searchQuery.isNotBlank()) return@LaunchedEffect
+        if (selectedCategoryIndex == animationTargetIndex) return@LaunchedEffect
+
+        val targetKey =
+            if (hasRecents && selectedCategoryIndex == 0) {
+                RECENTS_HEADER_KEY
+            } else {
+                val catIndex = selectedCategoryIndex - tabOffset
+                if (catIndex in categories.indices) {
+                    CATEGORY_HEADER_KEY_PREFIX + catIndex
+                } else {
+                    null
+                }
+            }
+        targetKey?.let { key ->
+            val itemIndex = gridItems.indexOfFirst { it is GridItem.Header && it.key == key }
+            if (itemIndex >= 0) {
+                try {
+                    animationTargetIndex = selectedCategoryIndex
+                    gridState.animateScrollToItem(itemIndex)
+                } finally {
+                    animationTargetIndex = null
+                }
+            }
+        }
+    }
+
+    // Sync tab selection with scroll position
+    LaunchedEffect(gridState, searchQuery) {
+        if (searchQuery.isNotBlank()) return@LaunchedEffect
+        snapshotFlow { gridState.firstVisibleItemIndex }
+            .collect { firstVisible ->
+                if (animationTargetIndex != null) return@collect
+                for (i in firstVisible downTo 0) {
+                    val item = gridItems.getOrNull(i)
+                    if (item is GridItem.Header) {
+                        val newIndex =
+                            if (item.key == RECENTS_HEADER_KEY) {
+                                0
+                            } else {
+                                val catIdx = item.key.removePrefix(CATEGORY_HEADER_KEY_PREFIX).toIntOrNull()
+                                if (catIdx != null) catIdx + tabOffset else selectedCategoryIndex
+                            }
+                        if (newIndex != selectedCategoryIndex) {
+                            onCategoryChanged(newIndex)
+                        }
+                        break
+                    }
+                }
+            }
+    }
+
+    val cellSize = emojiCellSize()
+    LazyVerticalGrid(
+        state = gridState,
+        columns = GridCells.Adaptive(minSize = cellSize),
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        gridItems.forEach { item ->
+            when (item) {
+                is GridItem.Header ->
+                    item(span = { GridItemSpan(maxLineSpan) }, key = item.key) {
+                        SectionHeader(title = localizedHeaderTitle(item))
+                    }
+
+                is GridItem.EmojiCell ->
+                    item(key = item.key) {
+                        EmojiCellWithSkinTone(
+                            emoji = item.emoji,
+                            cellSize = cellSize,
+                            isSelected = selectedEmojis.contains(item.emoji.base),
+                            preferredSkinToneIndex = preferredSkinToneIndex,
+                            onSkinToneSelect = onSkinToneSelect,
+                            onSelect = onEmojiSelected,
+                        )
+                    }
+            }
+        }
+
+        if (gridItems.none { it is GridItem.EmojiCell }) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    text = stringResource(Res.string.emoji_no_results),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(32.dp),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+// ── Grid Item Model ────────────────────────────────────────────────────────────
+
+private sealed class GridItem(open val key: String) {
+    data class Header(val title: String, override val key: String) : GridItem(key)
+
+    data class EmojiCell(val emoji: Emoji, override val key: String) : GridItem(key)
+}
+
+@Suppress("CyclomaticComplexMethod")
+private fun buildGridItems(
+    searchQuery: String,
+    recentEmojis: List<String>,
+    categories: List<EmojiCategory>,
+    allEmojis: List<Emoji>,
+): List<GridItem> = buildList {
+    if (searchQuery.isNotBlank()) {
+        val query = searchQuery.lowercase()
+        val results = rankSearchResults(query, allEmojis, recentEmojis)
+        results.forEachIndexed { i, emoji -> add(GridItem.EmojiCell(emoji, "search_$i")) }
+    } else {
+        if (recentEmojis.isNotEmpty()) {
+            // Title resolved at render time via localizedHeaderTitle (recents key → string resource)
+            add(GridItem.Header("", RECENTS_HEADER_KEY))
+            recentEmojis.forEachIndexed { i, emojiStr ->
+                add(GridItem.EmojiCell(Emoji(emojiStr), "$RECENTS_KEY_PREFIX$i"))
+            }
+        }
+        categories.forEachIndexed { catIndex, category ->
+            add(GridItem.Header(category.name, "$CATEGORY_HEADER_KEY_PREFIX$catIndex"))
+            category.emojis.forEachIndexed { emojiIndex, emoji ->
+                add(GridItem.EmojiCell(emoji, "cat_${catIndex}_$emojiIndex"))
+            }
+        }
+    }
+}
+
+/**
+ * Ranks search results using prefix-weighted scoring (inspired by Signal's approach). Exact keyword matches score
+ * highest, then prefix matches, then substring matches. Recently-used emoji matching the query get a boost.
+ */
+private fun rankSearchResults(query: String, allEmojis: List<Emoji>, recentEmojis: List<String>): List<Emoji> {
+    val recentSet = recentEmojis.toSet()
+
+    data class ScoredEmoji(val emoji: Emoji, val score: Float)
+
+    return allEmojis
+        .mapNotNull { emoji ->
+            val score = scoreEmoji(emoji, query, recentSet)
+            if (score > 0f) ScoredEmoji(emoji, score) else null
+        }
+        .sortedByDescending { it.score }
+        .map { it.emoji }
+}
+
+private const val SCORE_EXACT_MATCH = 10f
+private const val SCORE_PREFIX_MATCH = 4f
+private const val SCORE_SUBSTRING_MATCH = 1f
+private const val SCORE_BASE_CONTAINS = 0.5f
+private const val SCORE_RECENT_BOOST = 3f
+
+private fun scoreEmoji(emoji: Emoji, query: String, recentSet: Set<String>): Float {
+    var score = 0f
+
+    for (keyword in emoji.keywords) {
+        when {
+            keyword == query -> score += SCORE_EXACT_MATCH
+            keyword.startsWith(query) -> score += SCORE_PREFIX_MATCH
+            keyword.contains(query) -> score += SCORE_SUBSTRING_MATCH
+        }
+    }
+
+    if (emoji.base.contains(query)) score += SCORE_BASE_CONTAINS
+    if (score > 0f && emoji.base in recentSet) score += SCORE_RECENT_BOOST
+
+    return score
+}
+
+// ── Cell Components ────────────────────────────────────────────────────────────
+
+/**
+ * Resolves a grid header to localized text. Category names arrive as raw English strings from `emoji-data.json`, so
+ * they are mapped to string resources here; unknown names fall back to the raw value.
+ */
+@Composable
+private fun localizedHeaderTitle(header: GridItem.Header): String = if (header.key == RECENTS_HEADER_KEY) {
+    stringResource(Res.string.emoji_recently_used)
+} else {
+    when (header.title) {
+        "Smileys & Emotion" -> stringResource(Res.string.emoji_category_smileys_emotion)
+        "People & Body" -> stringResource(Res.string.emoji_category_people_body)
+        "Animals & Nature" -> stringResource(Res.string.emoji_category_animals_nature)
+        "Food & Drink" -> stringResource(Res.string.emoji_category_food_drink)
+        "Travel & Places" -> stringResource(Res.string.emoji_category_travel_places)
+        "Activities" -> stringResource(Res.string.emoji_category_activities)
+        "Objects" -> stringResource(Res.string.emoji_category_objects)
+        "Symbols" -> stringResource(Res.string.emoji_category_symbols)
+        "Flags" -> stringResource(Res.string.emoji_category_flags)
+        else -> header.title
+    }
+}
+
+/** Grid cell size that grows with the system font scale so emoji glyphs are never clipped. */
+@Composable
+private fun emojiCellSize(): Dp = emojiCellSizeFor(glyphSize = with(LocalDensity.current) { EMOJI_FONT_SIZE.sp.toDp() })
+
+/**
+ * Cell size for a glyph that measures [glyphSize] at the current font scale: never smaller than the glyph plus its
+ * padding, and never below [GRID_MIN_CELL_SIZE] so the cell stays a valid touch target.
+ */
+internal fun emojiCellSizeFor(glyphSize: Dp): Dp = max(GRID_MIN_CELL_SIZE, glyphSize + CELL_CONTENT_PADDING)
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
+    )
+}
+
+/**
+ * An emoji grid cell that supports:
+ * - **Tap** → select the emoji with the user's preferred skin tone applied
+ * - **Long-press** → if the emoji supports skin tones, show a popup with 6 Fitzpatrick variants
+ * - **Selected highlight** → tinted background when the emoji is in [isSelected]
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+@Suppress("LongParameterList")
+private fun EmojiCellWithSkinTone(
+    emoji: Emoji,
+    cellSize: Dp,
+    isSelected: Boolean,
+    preferredSkinToneIndex: Int,
+    onSkinToneSelect: (Int) -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    var showSkinTonePopup by rememberSaveable { mutableStateOf(false) }
+    val preferredTone = SkinTone.entries.getOrElse(preferredSkinToneIndex) { SkinTone.DEFAULT }
+    val displayEmoji = if (emoji.supportsSkinTone) emoji.withSkinTone(preferredTone) else emoji.base
+
+    Box {
+        Box(
+            modifier =
+            Modifier.size(cellSize)
+                .clip(RoundedCornerShape(8.dp))
+                .then(
+                    if (isSelected) {
+                        Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
+                    } else {
+                        Modifier
+                    },
+                )
+                .combinedClickable(
+                    onClick = { onSelect(displayEmoji) },
+                    onLongClick =
+                    if (emoji.supportsSkinTone) {
+                        { showSkinTonePopup = true }
+                    } else {
+                        null
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(text = displayEmoji, fontSize = EMOJI_FONT_SIZE.sp, textAlign = TextAlign.Center)
+            // Small dot indicator for skin-tone-capable emoji
+            if (emoji.supportsSkinTone) {
+                Box(
+                    modifier =
+                    Modifier.align(Alignment.BottomEnd)
+                        .padding(2.dp)
+                        .size(6.dp)
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f), CircleShape),
+                )
+            }
+        }
+
+        if (showSkinTonePopup) {
+            SkinTonePopup(
+                emoji = emoji,
+                onSelect = { variant, toneIndex ->
+                    showSkinTonePopup = false
+                    onSkinToneSelect(toneIndex)
+                    onSelect(variant)
+                },
+                onDismiss = { showSkinTonePopup = false },
+            )
+        }
+    }
+}
+
+// ── Skin Tone Popup ────────────────────────────────────────────────────────────
+
+@Composable
+private fun SkinTonePopup(emoji: Emoji, onSelect: (String, Int) -> Unit, onDismiss: () -> Unit) {
+    Popup(alignment = Alignment.TopCenter, onDismissRequest = onDismiss) {
+        SkinToneSurface(emoji = emoji, onSelect = onSelect)
+    }
+}
+
+/** Split out of [SkinTonePopup] so the scale-sensitive layout is reachable from a preview; [Popup] is not. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SkinToneSurface(emoji: Emoji, onSelect: (String, Int) -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)),
+        modifier = Modifier.widthIn(max = SKIN_TONE_POPUP_MAX_WIDTH),
+    ) {
+        // FlowRow so scale-grown cells wrap to a second line instead of clipping
+        FlowRow(
+            modifier = Modifier.padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            SkinTone.entries.forEachIndexed { index, tone ->
+                val variant = emoji.withSkinTone(tone)
+                Box(
+                    modifier =
+                    Modifier.defaultMinSize(minWidth = SKIN_TONE_CELL_MIN_SIZE, minHeight = SKIN_TONE_CELL_MIN_SIZE)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onSelect(variant, index) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(text = variant, fontSize = SKIN_TONE_FONT_SIZE.sp)
+                }
+            }
+        }
+    }
+}
+
+// ── Frequency Tracking ─────────────────────────────────────────────────────────
+
+private const val SPLIT_CHAR = ","
+private const val KEY_VALUE_DELIMITER = "="
+
+internal fun parseRecents(raw: String?): List<String> {
+    if (raw.isNullOrBlank()) return emptyList()
+    return raw.split(SPLIT_CHAR)
+        .mapNotNull { entry ->
+            entry
+                .split(KEY_VALUE_DELIMITER, limit = 2)
+                .takeIf { it.size == 2 }
+                ?.let { it[0] to (it[1].toIntOrNull() ?: 0) }
+        }
+        .sortedByDescending { it.second }
+        .take(MAX_RECENTS)
+        .map { it.first }
+}
+
+private fun recordSelection(emoji: String, viewModel: EmojiPickerViewModel) {
+    val raw = viewModel.customEmojiFrequency
+    val freq =
+        if (raw.isNullOrBlank()) {
+            mutableMapOf()
+        } else {
+            raw.split(SPLIT_CHAR)
+                .mapNotNull { entry ->
+                    entry
+                        .split(KEY_VALUE_DELIMITER, limit = 2)
+                        .takeIf { it.size == 2 }
+                        ?.let { it[0] to (it[1].toIntOrNull() ?: 0) }
+                }
+                .toMap()
+                .toMutableMap()
+        }
+    freq[emoji] = (freq[emoji] ?: 0) + 1
+    viewModel.customEmojiFrequency =
+        freq.entries.joinToString(SPLIT_CHAR) { "${it.key}$KEY_VALUE_DELIMITER${it.value}" }
+}
+
+// ── Previews ───────────────────────────────────────────────────────────────────
+
+private val PREVIEW_CATEGORIES =
+    listOf(
+        EmojiCategory(
+            "Smileys & Emotion",
+            "😀",
+            listOf(
+                Emoji("😀", listOf("grinning", "face", "smile")),
+                Emoji("😃", listOf("smiley", "face", "happy")),
+                Emoji("😄", listOf("smile", "happy", "joy")),
+                Emoji("😁", listOf("grin", "happy")),
+                Emoji("😆", listOf("laughing", "satisfied")),
+                Emoji("😅", listOf("sweat", "smile", "hot")),
+                Emoji("🤣", listOf("rofl", "laughing", "floor")),
+                Emoji("😂", listOf("joy", "tears", "laugh")),
+                Emoji("🙂", listOf("slightly", "smile")),
+                Emoji("😉", listOf("wink", "face")),
+                Emoji("😊", listOf("blush", "happy", "smile")),
+                Emoji("😇", listOf("angel", "innocent", "halo")),
+            ),
+        ),
+        EmojiCategory(
+            "People & Body",
+            "👋",
+            listOf(
+                Emoji("👋", listOf("wave", "hand", "hello"), supportsSkinTone = true),
+                Emoji("🤚", listOf("raised", "back", "hand"), supportsSkinTone = true),
+                Emoji("🖐️", listOf("hand", "splayed", "fingers"), supportsSkinTone = true),
+                Emoji("✋", listOf("hand", "high five", "stop"), supportsSkinTone = true),
+                Emoji("👍", listOf("thumbs up", "approve", "yes"), supportsSkinTone = true),
+                Emoji("👎", listOf("thumbs down", "disapprove", "no"), supportsSkinTone = true),
+                Emoji("👏", listOf("clap", "applause"), supportsSkinTone = true),
+                Emoji("🙌", listOf("raised", "hands", "celebration"), supportsSkinTone = true),
+            ),
+        ),
+    )
+
+@Suppress("UnusedPrivateMember", "PreviewPublic")
+@PreviewLightDark
+@Composable
+fun EmojiPickerContentPreview() {
+    AppTheme {
+        Surface {
+            EmojiPickerContent(
+                searchQuery = "",
+                debouncedQuery = "",
+                onSearchQueryChange = {},
+                selectedCategoryIndex = 0,
+                onCategorySelected = {},
+                selectedEmojis = setOf("😀", "👍"),
+                recentEmojis = listOf("😀", "❤️", "👍", "🔥", "😂", "🙏"),
+                categories = PREVIEW_CATEGORIES,
+                allEmojis = PREVIEW_CATEGORIES.flatMap { it.emojis },
+                preferredSkinToneIndex = 0,
+                onSkinToneSelect = {},
+                onEmojiSelected = {},
+            )
+        }
+    }
+}
+
+/** A skin-tone-capable emoji, so the preview renders all six variants. */
+private val SKIN_TONE_PREVIEW_EMOJI = Emoji("👋", listOf("wave", "hand", "hello"), supportsSkinTone = true)
+
+@Suppress("UnusedPrivateMember", "PreviewPublic")
+@Preview(fontScale = 2.0f)
+@Composable
+fun EmojiPickerContentLargeFontPreview() {
+    AppTheme {
+        Surface {
+            EmojiPickerContent(
+                searchQuery = "",
+                debouncedQuery = "",
+                onSearchQueryChange = {},
+                selectedCategoryIndex = 0,
+                onCategorySelected = {},
+                selectedEmojis = setOf("😀", "👍"),
+                recentEmojis = listOf("😀", "❤️", "👍", "🔥", "😂", "🙏"),
+                categories = PREVIEW_CATEGORIES,
+                allEmojis = PREVIEW_CATEGORIES.flatMap { it.emojis },
+                preferredSkinToneIndex = 0,
+                onSkinToneSelect = {},
+                onEmojiSelected = {},
+            )
+        }
+    }
+}
+
+@Suppress("UnusedPrivateMember", "PreviewPublic")
+@PreviewLightDark
+@Composable
+fun SkinTonePopupPreview() {
+    AppTheme { Surface { SkinToneSurface(emoji = SKIN_TONE_PREVIEW_EMOJI, onSelect = { _, _ -> }) } }
+}
+
+@Suppress("UnusedPrivateMember", "PreviewPublic")
+@Preview(fontScale = 2.0f)
+@Composable
+fun SkinTonePopupLargeFontPreview() {
+    AppTheme { Surface { SkinToneSurface(emoji = SKIN_TONE_PREVIEW_EMOJI, onSelect = { _, _ -> }) } }
+}
+
+@Suppress("UnusedPrivateMember", "PreviewPublic")
+@PreviewLightDark
+@Composable
+fun EmojiPickerSearchPreview() {
+    AppTheme {
+        Surface {
+            EmojiPickerContent(
+                searchQuery = "smile",
+                debouncedQuery = "smile",
+                onSearchQueryChange = {},
+                selectedCategoryIndex = 0,
+                onCategorySelected = {},
+                selectedEmojis = emptySet(),
+                recentEmojis = listOf("😀", "❤️", "👍"),
+                categories = PREVIEW_CATEGORIES,
+                allEmojis = PREVIEW_CATEGORIES.flatMap { it.emojis },
+                preferredSkinToneIndex = 0,
+                onSkinToneSelect = {},
+                onEmojiSelected = {},
+            )
+        }
+    }
+}

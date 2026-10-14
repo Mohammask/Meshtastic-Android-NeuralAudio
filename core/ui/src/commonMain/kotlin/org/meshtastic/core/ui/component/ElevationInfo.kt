@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.core.ui.component
+
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.tooling.preview.Preview
+import org.jetbrains.compose.resources.stringResource
+import org.meshtastic.core.common.util.MeasurementSystem
+import org.meshtastic.core.model.util.toElevationString
+import org.meshtastic.core.resources.Res
+import org.meshtastic.core.resources.altitude
+import org.meshtastic.core.resources.elevation_suffix
+import org.meshtastic.core.ui.icon.Elevation
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.theme.AppTheme
+
+@Composable
+fun ElevationInfo(
+    modifier: Modifier = Modifier,
+    altitude: Int,
+    system: MeasurementSystem,
+    suffix: String = stringResource(Res.string.elevation_suffix),
+    contentColor: Color = MaterialTheme.colorScheme.onSurface,
+) {
+    IconInfo(
+        modifier = modifier,
+        icon = MeshtasticIcons.Elevation,
+        contentDescription = stringResource(Res.string.altitude),
+        label = stringResource(Res.string.altitude),
+        text = altitude.toElevationString(system) + " " + suffix,
+        contentColor = contentColor,
+    )
+}
+
+@Composable
+@Preview
+fun ElevationInfoPreview() {
+    AppTheme { ElevationInfo(altitude = 100, system = MeasurementSystem.METRIC, suffix = "ASL") }
+}

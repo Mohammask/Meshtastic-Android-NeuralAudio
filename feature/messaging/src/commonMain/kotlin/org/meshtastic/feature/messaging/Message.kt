@@ -1,0 +1,1294 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+@file:Suppress("TooManyFunctions")
+
+package org.meshtastic.feature.messaging
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.OutputTransformation
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalClipboard
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.PreviewLightDark
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.paging.compose.collectAsLazyPagingItems
+import kotlinx.collections.immutable.ImmutableMap
+import kotlinx.collections.immutable.persistentMapOf
+import kotlinx.collections.immutable.toPersistentMap
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
+import org.meshtastic.core.common.util.HomoglyphCharacterStringTransformer
+import org.meshtastic.core.database.entity.QuickChatAction
+import org.meshtastic.core.model.ConnectionState
+import org.meshtastic.core.model.ContactKey
+import org.meshtastic.core.model.MENTION_TOKEN_REGEX
+import org.meshtastic.core.model.Node
+import org.meshtastic.core.model.NodeAddress
+import org.meshtastic.core.model.media.ActionTargetMode
+import org.meshtastic.core.model.media.ChunkingEngine
+import org.meshtastic.core.model.util.getChannel
+import org.meshtastic.core.resources.Res
+import org.meshtastic.core.resources.send
+import org.meshtastic.core.resources.type_a_message
+import org.meshtastic.core.resources.unknown_channel
+import org.meshtastic.core.ui.component.InlineStyle
+import org.meshtastic.core.ui.component.SharedContactDialog
+import org.meshtastic.core.ui.component.smartScrollToIndex
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.icon.Send
+import org.meshtastic.core.ui.theme.AppTheme
+import org.meshtastic.core.ui.util.createClipEntry
+import org.meshtastic.feature.messaging.component.ActionModeTopBar
+import org.meshtastic.feature.messaging.component.AttachmentBar
+import org.meshtastic.feature.messaging.component.AttachmentPreviewCard
+import org.meshtastic.feature.messaging.component.DeleteMessageDialog
+import org.meshtastic.feature.messaging.component.ExpandableThinkingView
+import org.meshtastic.feature.messaging.component.FormattingToolbar
+import org.meshtastic.feature.messaging.component.InlineRecordingBar
+import org.meshtastic.feature.messaging.component.LivePttCallScreen
+import org.meshtastic.feature.messaging.component.MESSAGE_CHARACTER_LIMIT_BYTES
+import org.meshtastic.feature.messaging.component.MessageMenuAction
+import org.meshtastic.feature.messaging.component.MessageSearchBar
+import org.meshtastic.feature.messaging.component.MessageTopBar
+import org.meshtastic.feature.messaging.component.QuickChatRow
+import org.meshtastic.feature.messaging.component.ReplySnippet
+import org.meshtastic.feature.messaging.component.ScreenshotProgressView
+import org.meshtastic.feature.messaging.component.ScrollToBottomFab
+import org.meshtastic.feature.messaging.component.TerminalExecutionView
+import org.meshtastic.feature.messaging.component.TranslationModelDownloadDialog
+
+private const val ROUNDED_CORNER_PERCENT = 100
+private const val MAX_LINES = 3
+
+// Minimum draft length before the markdown formatting toolbar appears (matches the iOS client).
+private const val FORMATTING_TOOLBAR_MIN_CHARS = 3
+
+// Byte counter appears only once the draft is within this much of the limit.
+private const val COUNTER_VISIBLE_WITHIN_BYTES = 20
+
+/**
+ * The main screen for displaying and sending messages to a contact or channel.
+ *
+ * @param contactKey A unique key identifying the contact or channel.
+ * @param message An optional message to pre-fill in the input field.
+ * @param viewModel The [MessageViewModel] instance for handling business logic and state.
+ * @param navigateToNodeDetails Callback to navigate to a node's detail screen.
+ * @param navigateToQuickChatOptions Callback to navigate to the quick chat options screen.
+ * @param navigateToFilterSettings Callback to navigate to the message filter settings screen.
+ * @param onNavigateBack Callback to navigate back from this screen.
+ */
+@Suppress("LongMethod", "CyclomaticComplexMethod")
+@Composable
+fun MessageScreen(
+    contactKey: String,
+    message: String,
+    viewModel: MessageViewModel,
+    navigateToNodeDetails: (Int) -> Unit,
+    navigateToQuickChatOptions: () -> Unit,
+    navigateToFilterSettings: () -> Unit,
+    onNavigateBack: () -> Unit,
+) {
+    val coroutineScope = rememberCoroutineScope()
+    val clipboardManager = LocalClipboard.current
+    val focusManager = LocalFocusManager.current
+
+    val nodes by viewModel.nodeList.collectAsStateWithLifecycle()
+    val mentionCandidates =
+        remember(nodes) {
+            nodes
+                .associate { it.user.id to MentionCandidate(it.user.id, it.user.long_name, it.user.short_name) }
+                .toPersistentMap()
+        }
+    val ourNode by viewModel.ourNodeInfo.collectAsStateWithLifecycle()
+    val connectionState by viewModel.connectionState.collectAsStateWithLifecycle()
+    val channels by viewModel.channels.collectAsStateWithLifecycle()
+    val quickChatActions by viewModel.quickChatActions.collectAsStateWithLifecycle(initialValue = emptyList())
+    val pagedMessages = viewModel.getMessagesFromPaged(contactKey).collectAsLazyPagingItems()
+    val contactSettings by viewModel.contactSettings.collectAsStateWithLifecycle(initialValue = emptyMap())
+    val homoglyphEncodingEnabled by viewModel.homoglyphEncodingEnabled.collectAsStateWithLifecycle(initialValue = false)
+
+    // UI State managed within this Composable
+    var replyingToPacketId by rememberSaveable { mutableStateOf<Int?>(null) }
+    var showDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var sharedContact by rememberSaveable { mutableStateOf<Node?>(null) }
+    val selectedMessageIds = rememberSaveable { mutableStateOf(emptySet<Long>()) }
+    val messageInputState = rememberTextFieldState(message)
+    val showQuickChat by viewModel.showQuickChat.collectAsStateWithLifecycle()
+    val showFullMessageTimestamps by viewModel.showFullMessageTimestamps.collectAsStateWithLifecycle()
+    val filteredCount by viewModel.filteredCount.collectAsStateWithLifecycle()
+    val showFiltered by viewModel.showFiltered.collectAsStateWithLifecycle()
+    val filteringDisabled = contactSettings[contactKey]?.filteringDisabled ?: false
+    val isSearchActive by viewModel.isSearchActive.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val searchResultIndex by viewModel.searchResultIndex.collectAsStateWithLifecycle()
+    val currentSearchResult by viewModel.currentSearchResult.collectAsStateWithLifecycle()
+    val translationAvailable by viewModel.translationAvailable.collectAsStateWithLifecycle()
+    val translationDialogState by viewModel.translationDialogState.collectAsStateWithLifecycle()
+    val pcAiStreamState by viewModel.pcAiStreamState.collectAsStateWithLifecycle()
+    val pttSessionState by viewModel.pttSessionState.collectAsStateWithLifecycle()
+    val activeAudioCodec by viewModel.audioCodec.collectAsStateWithLifecycle()
+    val inboundMediaProgress by viewModel.inboundMediaProgress.collectAsStateWithLifecycle()
+    val selectedTargetMode = ActionTargetMode.P2P
+    var stagedImagePath by remember { mutableStateOf<String?>(null) }
+    var showLivePttScreen by remember { mutableStateOf(false) }
+
+    // Read the stored draft before wiring the composer up, so its initial empty value cannot erase one.
+    LaunchedEffect(contactKey) {
+        viewModel.loadDraft(contactKey)
+        viewModel.draftMessage
+            .firstOrNull { !it.isNullOrEmpty() }
+            ?.let { draft ->
+                if (messageInputState.text.isEmpty()) {
+                    messageInputState.setTextAndPlaceCursorAtEnd(draft)
+                }
+            }
+    }
+
+    // Sync text field changes back to ViewModel draft with 300ms debounce to prevent keystroke lag
+    @OptIn(FlowPreview::class)
+    LaunchedEffect(messageInputState) {
+        snapshotFlow { messageInputState.text.toString() }
+            .debounce(300L)
+            .collect { text -> viewModel.setDraftMessage(text) }
+    }
+
+    // Prevent the message TextField from stealing focus when the screen opens
+    SideEffect(contactKey) { focusManager.clearFocus() }
+
+    // Tell the notification path this conversation is on screen, so an arriving message for it is not announced twice.
+    LifecycleResumeEffect(contactKey) {
+        viewModel.onConversationVisible(contactKey)
+        onPauseOrDispose { viewModel.onConversationHidden(contactKey) }
+    }
+
+    // Derived state, memoized for performance
+    val channelInfo =
+        remember(contactKey, channels) {
+            val parsedKey = ContactKey(contactKey)
+            val index = parsedKey.channelOrNull
+            val id = parsedKey.addressString
+            val name = index?.let { channels.getChannel(it)?.name } // channels can be null initially
+            Triple(index, id, name)
+        }
+    val (channelIndex, nodeId, rawChannelName) = channelInfo
+    val unknownChannelText = stringResource(Res.string.unknown_channel)
+    val channelName = rawChannelName ?: unknownChannelText
+
+    val title =
+        remember(nodeId, channelName, viewModel) {
+            when (nodeId) {
+                NodeAddress.ID_BROADCAST -> channelName
+                else -> viewModel.getUser(nodeId).long_name
+            }
+        }
+
+    val isMismatchKey =
+        remember(channelIndex, nodeId, viewModel) {
+            channelIndex == NodeAddress.PKC_CHANNEL_INDEX && viewModel.getNode(nodeId).mismatchKey
+        }
+
+    val inSelectionMode by remember { derivedStateOf { selectedMessageIds.value.isNotEmpty() } }
+
+    val listState = rememberLazyListState()
+
+    // Track unread messages using lightweight metadata queries
+    val hasUnreadMessages by viewModel.hasUnreadMessages.collectAsStateWithLifecycle()
+    val unreadCount by viewModel.unreadCount.collectAsStateWithLifecycle()
+    val firstUnreadMessageUuid by viewModel.firstUnreadMessageUuid.collectAsStateWithLifecycle()
+    val isSendingVoiceNote by viewModel.isSendingVoiceNote.collectAsStateWithLifecycle()
+    val isProcessingVoiceNote by viewModel.isProcessingVoiceNote.collectAsStateWithLifecycle()
+    val outboundVoiceProgress by viewModel.outboundVoiceProgress.collectAsStateWithLifecycle()
+    val isRadioBusy by viewModel.isRadioBusy.collectAsStateWithLifecycle()
+
+    var isRecordingVoiceNote by remember { mutableStateOf(false) }
+    var recordingVoiceNoteSeconds by remember { mutableIntStateOf(0) }
+    var cancelRecordingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var stopRecordingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    var hasPerformedInitialScroll by rememberSaveable(contactKey) { mutableStateOf(false) }
+
+    // Find the index of the first unread message in the paged list
+    val firstUnreadIndex by
+        remember(pagedMessages.itemCount, firstUnreadMessageUuid) {
+            derivedStateOf {
+                firstUnreadMessageUuid?.let { uuid ->
+                    pagedMessages.itemSnapshotList.indexOfFirst { it?.uuid == uuid }.takeIf { it != -1 }
+                }
+            }
+        }
+
+    // Scroll to first unread message on initial load
+    LaunchedEffect(
+        hasPerformedInitialScroll,
+        firstUnreadIndex,
+        pagedMessages.itemCount,
+        hasUnreadMessages,
+        firstUnreadMessageUuid,
+    ) {
+        if (hasPerformedInitialScroll || pagedMessages.itemCount == 0) return@LaunchedEffect
+        if (hasUnreadMessages == null) return@LaunchedEffect // Wait for DB state to initialize
+
+        if (hasUnreadMessages == true) {
+            if (firstUnreadMessageUuid == null) return@LaunchedEffect // Wait for UUID query
+
+            val index = firstUnreadIndex
+            if (index != null) {
+                val targetIndex = (index - (UnreadUiDefaults.VISIBLE_CONTEXT_COUNT - 1)).coerceAtLeast(0)
+                listState.smartScrollToIndex(coroutineScope = coroutineScope, targetIndex = targetIndex)
+                hasPerformedInitialScroll = true
+            } else {
+                // The first unread message is deeper than the currently loaded pages.
+                // Scroll to the end of the loaded items to trigger the next page load.
+                // This will re-trigger this LaunchedEffect until we find the message.
+                listState.scrollToItem(pagedMessages.itemCount - 1)
+            }
+        } else {
+            // If no unread messages, just scroll to bottom (most recent)
+            listState.scrollToItem(0)
+            hasPerformedInitialScroll = true
+        }
+    }
+
+    // Scroll to the current search result when navigating prev/next
+    LaunchedEffect(currentSearchResult) {
+        val targetUuid = currentSearchResult?.uuid ?: return@LaunchedEffect
+        val index = pagedMessages.itemSnapshotList.indexOfFirst { it?.uuid == targetUuid }
+        if (index != -1) {
+            listState.animateScrollToItem(index)
+        }
+    }
+
+    // Who sent the newest unread message, for the jump-to-latest pill. Own messages are never unread, so this is
+    // simply the newest loaded message that did not come from this device.
+    val newestUnreadSender by
+        remember(pagedMessages.itemCount, unreadCount) {
+            derivedStateOf {
+                if (unreadCount == 0) {
+                    null
+                } else {
+                    pagedMessages.itemSnapshotList
+                        .firstOrNull { it != null && !it.fromLocal && !it.read }
+                        ?.node
+                        ?.user
+                        // Blank, not just empty: a name of only spaces would render an empty pill.
+                        ?.let { user ->
+                            user.long_name.takeIf { it.isNotBlank() } ?: user.short_name.takeIf { it.isNotBlank() }
+                        }
+                }
+            }
+        }
+
+    val onEvent: (MessageScreenEvent) -> Unit =
+        remember(viewModel, contactKey, messageInputState, ourNode) {
+            fun handle(event: MessageScreenEvent) {
+                when (event) {
+                    is MessageScreenEvent.SendMessage -> {
+                        viewModel.sendMessage(event.text, contactKey, event.replyingToPacketId)
+                        if (event.replyingToPacketId != null) replyingToPacketId = null
+                        messageInputState.clearText()
+                        viewModel.clearDraftMessage()
+                    }
+
+                    is MessageScreenEvent.SendReaction ->
+                        viewModel.sendReaction(event.emoji, event.messageId, contactKey)
+
+                    is MessageScreenEvent.DeleteMessages -> {
+                        viewModel.deleteMessages(event.ids)
+                        selectedMessageIds.value = emptySet()
+                        showDeleteDialog = false
+                    }
+
+                    is MessageScreenEvent.ClearUnreadCount ->
+                        viewModel.clearUnreadCount(contactKey, event.messageUuid, event.lastReadTimestamp)
+
+                    is MessageScreenEvent.NodeDetails -> navigateToNodeDetails(event.node.num)
+
+                    is MessageScreenEvent.SetTitle -> viewModel.setTitle(event.title)
+
+                    is MessageScreenEvent.NavigateToNodeDetails -> navigateToNodeDetails(event.nodeNum)
+
+                    MessageScreenEvent.NavigateBack -> onNavigateBack()
+
+                    is MessageScreenEvent.CopyToClipboard -> {
+                        coroutineScope.launch { clipboardManager.setClipEntry(createClipEntry(event.text, event.text)) }
+                        selectedMessageIds.value = emptySet()
+                    }
+
+                    is MessageScreenEvent.TranslateMessage -> viewModel.translateMessage(event.message)
+
+                    is MessageScreenEvent.ToggleShowTranslated -> viewModel.toggleShowTranslated(event.message)
+
+                    is MessageScreenEvent.SendVoiceNote ->
+                        viewModel.sendVoiceNote(
+                            durationSeconds = event.durationSeconds,
+                            audioBytes = event.audioBytes,
+                            contactKey = contactKey,
+                        )
+
+                    is MessageScreenEvent.SendImageAttachment ->
+                        viewModel.sendImageAttachment(
+                            mediaPath = event.mediaPath,
+                            caption = event.caption,
+                            contactKey = contactKey,
+                        )
+
+                    is MessageScreenEvent.SendPcCommand ->
+                        viewModel.sendPcCommand(
+                            command = event.command,
+                            targetMode = event.targetMode,
+                            imagePayload = event.imagePayload,
+                            contactKey = contactKey,
+                        )
+                }
+            }
+
+            ::handle
+        }
+
+    if (showDeleteDialog) {
+        DeleteMessageDialog(
+            count = selectedMessageIds.value.size,
+            onConfirm = { onEvent(MessageScreenEvent.DeleteMessages(selectedMessageIds.value.toList())) },
+            onDismiss = { showDeleteDialog = false },
+        )
+    }
+
+    TranslationModelDownloadDialog(
+        state = translationDialogState,
+        onConfirm = viewModel::confirmTranslationModelDownload,
+        onDismiss = viewModel::dismissTranslationDialog,
+    )
+
+    sharedContact?.let { contact -> SharedContactDialog(contact = contact, onDismiss = { sharedContact = null }) }
+
+    val originalMessage by
+        remember(replyingToPacketId, pagedMessages.itemCount) {
+            derivedStateOf {
+                replyingToPacketId?.let { id -> pagedMessages.itemSnapshotList.firstOrNull { it?.packetId == id } }
+            }
+        }
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            if (inSelectionMode) {
+                ActionModeTopBar(
+                    selectedCount = selectedMessageIds.value.size,
+                    onAction = { action ->
+                        when (action) {
+                            MessageMenuAction.ClipboardCopy -> {
+                                val copiedText =
+                                    (0 until pagedMessages.itemCount)
+                                        .mapNotNull { pagedMessages[it] }
+                                        .filter { it.uuid in selectedMessageIds.value }
+                                        .joinToString("\n") {
+                                            // Copy what the bubble displays (matches the sheet's Copy action)
+                                            it.displayedText(searching = isSearchActive && searchQuery.isNotEmpty())
+                                        }
+                                onEvent(MessageScreenEvent.CopyToClipboard(copiedText))
+                            }
+
+                            MessageMenuAction.Delete -> showDeleteDialog = true
+
+                            MessageMenuAction.Dismiss -> selectedMessageIds.value = emptySet()
+
+                            MessageMenuAction.SelectAll -> {
+                                // Note: Select All is disabled with pagination since we don't have
+                                // access to the full message list. This would need to be reworked
+                                // to select all currently loaded items instead.
+                                selectedMessageIds.value =
+                                    if (selectedMessageIds.value.size == pagedMessages.itemCount) {
+                                        emptySet()
+                                    } else {
+                                        (0 until pagedMessages.itemCount).mapNotNull { pagedMessages[it]?.uuid }.toSet()
+                                    }
+                            }
+                        }
+                    },
+                )
+            } else if (isSearchActive) {
+                MessageSearchBar(
+                    query = searchQuery,
+                    onQueryChange = viewModel::setSearchQuery,
+                    onClose = viewModel::closeSearch,
+                    resultCount = searchResults.size,
+                    currentIndex = searchResultIndex,
+                    onPrevious = viewModel::navigateToPreviousResult,
+                    onNext = viewModel::navigateToNextResult,
+                )
+            } else {
+                MessageTopBar(
+                    title = title,
+                    channelIndex = channelIndex,
+                    mismatchKey = isMismatchKey,
+                    onNavigateBack = { onEvent(MessageScreenEvent.NavigateBack) },
+                    channels = channels,
+                    channelIndexParam = channelIndex,
+                    showQuickChat = showQuickChat,
+                    onToggleQuickChat = viewModel::toggleShowQuickChat,
+                    onNavigateToQuickChatOptions = navigateToQuickChatOptions,
+                    filteringDisabled = filteringDisabled,
+                    onToggleFilteringDisabled = {
+                        viewModel.setContactFilteringDisabled(contactKey, !filteringDisabled)
+                    },
+                    filteredCount = filteredCount,
+                    showFiltered = showFiltered,
+                    onToggleShowFiltered = viewModel::toggleShowFiltered,
+                    onNavigateToFilterSettings = navigateToFilterSettings,
+                    onSearchClick = viewModel::toggleSearch,
+                )
+            }
+        },
+        bottomBar = {
+            Column {
+                AnimatedVisibility(visible = showQuickChat) {
+                    QuickChatRow(
+                        enabled = connectionState is ConnectionState.Connected,
+                        actions = quickChatActions,
+                        onClick = { action ->
+                            handleQuickChatAction(
+                                action = action,
+                                messageInputState = messageInputState,
+                                onSendMessage = { text -> onEvent(MessageScreenEvent.SendMessage(text)) },
+                            )
+                        },
+                    )
+                }
+                ReplySnippet(
+                    originalMessage = originalMessage,
+                    onClearReply = { replyingToPacketId = null },
+                    ourNode = ourNode,
+                )
+                val pendingInvitation = pttSessionState.pendingInvitation
+                if (pendingInvitation != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                text = "📻 ${pendingInvitation.hostName} is in the PTT Room",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(
+                                    onClick = {
+                                        viewModel.joinLivePttSession(
+                                            pendingInvitation.hostNodeId,
+                                            pendingInvitation.hostName,
+                                        )
+                                        showLivePttScreen = true
+                                    },
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                ) {
+                                    Text("Join", style = MaterialTheme.typography.labelSmall)
+                                }
+                                TextButton(
+                                    onClick = { viewModel.dismissPttInvitation() },
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                ) {
+                                    Text("Dismiss", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                val currentStagedPath = stagedImagePath
+                if (currentStagedPath != null) {
+                    AttachmentPreviewCard(
+                        filePath = currentStagedPath,
+                        onDismiss = { stagedImagePath = null },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+
+                if (pcAiStreamState.isAwaitingScreenshot) {
+                    ScreenshotProgressView(
+                        awaitingSinceTimestamp = pcAiStreamState.awaitingSinceTimestamp,
+                        onCancel = { viewModel.cancelPcCommandSession(contactKey) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                } else if (pcAiStreamState.isExecuting) {
+                    TerminalExecutionView(
+                        command = pcAiStreamState.executingCommand,
+                        output = pcAiStreamState.responseText,
+                        isExecuting = pcAiStreamState.isExecuting,
+                        awaitingSinceTimestamp = pcAiStreamState.awaitingSinceTimestamp,
+                        onCancel = { viewModel.cancelPcCommandSession(contactKey) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                } else if (pcAiStreamState.isThinking || pcAiStreamState.isResponseStreaming) {
+                    ExpandableThinkingView(
+                        thinkingThoughts = pcAiStreamState.thinkingThoughts,
+                        finalResponse = pcAiStreamState.responseText,
+                        isThinking = pcAiStreamState.isThinking,
+                        isStreamingResponse = pcAiStreamState.isResponseStreaming,
+                        awaitingSinceTimestamp = pcAiStreamState.awaitingSinceTimestamp,
+                        onCancel = { viewModel.cancelPcCommandSession(contactKey) },
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                }
+
+                // Inbound Media Reception Progress Banner
+                AnimatedVisibility(
+                    visible = inboundMediaProgress != null,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                ) {
+                    inboundMediaProgress?.let { progress ->
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            tonalElevation = 2.dp,
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                CircularProgressIndicator(
+                                    progress = {
+                                        if (progress.totalChunks > 0) {
+                                            progress.receivedChunks.toFloat() / progress.totalChunks
+                                        } else {
+                                            0f
+                                        }
+                                    },
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                                val label =
+                                    if (progress.payloadType == ChunkingEngine.TYPE_IMAGE_1BIT) {
+                                        "🖼️ Receiving image... (Chunk ${progress.receivedChunks} / ${progress.totalChunks})"
+                                    } else {
+                                        "📻 Receiving voice note... (Chunk ${progress.receivedChunks} / ${progress.totalChunks})"
+                                    }
+                                Text(
+                                    text = label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Outbound Voice Note Progress Banner
+                AnimatedVisibility(visible = outboundVoiceProgress != null) {
+                    val progress = outboundVoiceProgress
+                    if (progress != null) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            tonalElevation = 2.dp,
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text =
+                                        "📤 Sending voice note... (Chunk ${progress.first} / ${progress.second})",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    val percent =
+                                        if (progress.second > 0) {
+                                            ((progress.first.toFloat() / progress.second) * 100).toInt()
+                                        } else {
+                                            0
+                                        }
+                                    Text(
+                                        text = "$percent%",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    )
+                                }
+                                LinearProgressIndicator(
+                                    progress = {
+                                        if (progress.second > 0) {
+                                            progress.first.toFloat() / progress.second
+                                        } else {
+                                            0f
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                AttachmentBar(
+                    enabled = connectionState is ConnectionState.Connected && !pcAiStreamState.isAwaitingResponse,
+                    selectedMode = selectedTargetMode,
+                    codecName = activeAudioCodec,
+                    isSendingVoiceNote = isSendingVoiceNote,
+                    isProcessingVoiceNote = isProcessingVoiceNote,
+                    isReceivingVoiceNote =
+                    inboundMediaProgress != null || pttSessionState.isReceiving || pttSessionState.isPlayingAudio,
+                    outboundMediaProgress = outboundVoiceProgress,
+                    inboundMediaProgress = inboundMediaProgress,
+                    isRadioBusy = isRadioBusy,
+                    onModeChanged = { /* locked to P2P */ },
+                    onOpenLivePttScreen = { showLivePttScreen = true },
+                    onSelectImage = { filePath -> stagedImagePath = filePath },
+                    onAudioRecorded = { durationSeconds, audioBytes ->
+                        onEvent(MessageScreenEvent.SendVoiceNote(durationSeconds, audioBytes))
+                    },
+                    onTriggerScreenshot = {},
+                    onRecordingStateChanged = { isRec, secs, onCancel, onStop ->
+                        isRecordingVoiceNote = isRec
+                        recordingVoiceNoteSeconds = secs
+                        cancelRecordingAction = onCancel
+                        stopRecordingAction = onStop
+                        viewModel.setRecordingVoiceNote(isRec)
+                    },
+                )
+                if (isRecordingVoiceNote) {
+                    InlineRecordingBar(
+                        recordingSeconds = recordingVoiceNoteSeconds,
+                        onCancel = { cancelRecordingAction?.invoke() },
+                        onStop = { stopRecordingAction?.invoke() },
+                    )
+                } else {
+                    MessageInput(
+                        isEnabled =
+                        connectionState is ConnectionState.Connected &&
+                            selectedTargetMode.allowsTextInput &&
+                            !pcAiStreamState.isAwaitingResponse,
+                        isHomoglyphEncodingEnabled = homoglyphEncodingEnabled,
+                        textFieldState = messageInputState,
+                        mentionCandidates = mentionCandidates,
+                        onSendMessage = {
+                            val messageText = messageInputState.text.toString().trim { it.isWhitespace() }
+                            val currentStaged = stagedImagePath
+                            if (currentStaged != null) {
+                                stagedImagePath = null
+                                onEvent(
+                                    MessageScreenEvent.SendImageAttachment(currentStaged, messageText.ifEmpty { null }),
+                                )
+                                messageInputState.clearText()
+                            } else if (messageText.isNotEmpty()) {
+                                if (selectedTargetMode == ActionTargetMode.P2P) {
+                                    onEvent(MessageScreenEvent.SendMessage(messageText, replyingToPacketId))
+                                } else {
+                                    onEvent(MessageScreenEvent.SendPcCommand(messageText, selectedTargetMode))
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        },
+    ) { paddingValues ->
+        Box(Modifier.fillMaxSize().padding(paddingValues).focusable()) {
+            MessageListPaged(
+                modifier = Modifier.fillMaxSize(),
+                listState = listState,
+                state =
+                MessageListPagedState(
+                    nodes = nodes,
+                    ourNode = ourNode,
+                    messages = pagedMessages,
+                    selectedIds = selectedMessageIds,
+                    contactKey = contactKey,
+                    firstUnreadMessageUuid = firstUnreadMessageUuid,
+                    hasUnreadMessages = hasUnreadMessages == true,
+                    filteredCount = filteredCount,
+                    showFiltered = showFiltered,
+                    filteringDisabled = filteringDisabled,
+                    searchQuery = if (isSearchActive) searchQuery else "",
+                    translationAvailable = translationAvailable,
+                    showFullMessageTimestamps = showFullMessageTimestamps,
+                ),
+                handlers =
+                MessageListHandlers(
+                    onUnreadChanged = { messageUuid, timestamp ->
+                        onEvent(MessageScreenEvent.ClearUnreadCount(messageUuid, timestamp))
+                    },
+                    onSendReaction = { emoji, id -> onEvent(MessageScreenEvent.SendReaction(emoji, id)) },
+                    onClickChip = { onEvent(MessageScreenEvent.NodeDetails(it)) },
+                    onDeleteMessages = { viewModel.deleteMessages(it) },
+                    onSendMessage = { text, key -> viewModel.sendMessage(text, key) },
+                    onReply = { message -> replyingToPacketId = message?.packetId },
+                    onTranslate = { onEvent(MessageScreenEvent.TranslateMessage(it)) },
+                    onToggleTranslation = { onEvent(MessageScreenEvent.ToggleShowTranslated(it)) },
+                ),
+                quickEmojis = viewModel.frequentEmojis,
+            )
+            // Show FAB if we can scroll towards the newest messages (index 0).
+            if (listState.canScrollBackward) {
+                ScrollToBottomFab(coroutineScope, listState, unreadCount, newestUnreadSender)
+            }
+        }
+    }
+
+    if (showLivePttScreen) {
+        LivePttCallScreen(
+            contactName = title,
+            isReceiving = pttSessionState.isReceiving,
+            receivingSpeakerName = pttSessionState.activeSpeakerName,
+            isBothActive = pttSessionState.isBothActive,
+            activeUsersCount = pttSessionState.participants.size.coerceAtLeast(1),
+            activePeersCount = pttSessionState.activePeersCount,
+            codecName = activeAudioCodec,
+            isFloorRejected = pttSessionState.floorRejected,
+            lastPeerJoinedName = pttSessionState.lastPeerJoinedName,
+            isPlayingAudio = pttSessionState.isPlayingAudio,
+            isSending = isSendingVoiceNote || isProcessingVoiceNote || pttSessionState.isAwaitingPeerPlayback,
+            onDismiss = {
+                showLivePttScreen = false
+                viewModel.leaveLivePttSession(contactKey)
+            },
+            onEnterScreen = { viewModel.enterLivePttSession(contactKey) },
+            onExitScreen = { viewModel.leaveLivePttSession(contactKey) },
+            onRequestFloor = { viewModel.requestPttFloor(contactKey) },
+            onReleaseFloor = { viewModel.releasePttFloor(contactKey) },
+            onSendPttAudio = { durationSeconds, audioBytes ->
+                viewModel.sendVoiceNote(durationSeconds, audioBytes, contactKey = contactKey, isLivePtt = true)
+            },
+            txProgress = outboundVoiceProgress,
+            rxProgress = inboundMediaProgress?.let { it.receivedChunks to it.totalChunks },
+        )
+    }
+}
+
+/**
+ * Handles a quick chat action, either appending its message to the input field or sending it directly.
+ *
+ * @param action The [QuickChatAction] to handle.
+ * @param messageInputState The [TextFieldState] of the message input field.
+ * @param onSendMessage Lambda to call when a message needs to be sent.
+ */
+private fun handleQuickChatAction(
+    action: QuickChatAction,
+    messageInputState: TextFieldState,
+    onSendMessage: (String) -> Unit,
+) {
+    org.meshtastic.feature.messaging.component.handleQuickChatAction(
+        action = action,
+        currentText = messageInputState.text.toString(),
+        onUpdateText = { newText -> messageInputState.setTextAndPlaceCursorAtEnd(newText) },
+        onSendMessage = onSendMessage,
+    )
+}
+
+private const val MENTION_SUGGESTION_LIMIT = 5
+
+/** An in-progress `@name` the user is typing (before selection completes it into a `@!<hex>` token). */
+internal data class MentionQuery(val start: Int, val end: Int, val query: String)
+
+/**
+ * Detects an active @mention query: an `@` at the caret that starts a word and is followed only by non-whitespace.
+ * Returns null when there is nothing to autocomplete (already-completed tokens include a trailing space, so they fail
+ * the no-whitespace check).
+ */
+@Suppress("ReturnCount") // Guard clauses read more clearly than a single nested expression here.
+internal fun currentMentionQuery(text: String, selection: TextRange): MentionQuery? {
+    if (!selection.collapsed) return null
+    val cursor = selection.start
+    if (cursor == 0) return null
+    val at = text.lastIndexOf('@', cursor - 1)
+    if (at < 0) return null
+    if (at > 0 && !text[at - 1].isWhitespace()) return null
+    val query = text.substring(at + 1, cursor)
+    if (query.any { it.isWhitespace() }) return null
+    return MentionQuery(at, cursor, query)
+}
+
+/**
+ * Lightweight mention target — contains only fields that affect composer presentation. A telemetry-only [Node] change
+ * leaves a [MentionCandidate] unchanged so the composable's recomposition scope stays narrow. Normalized fields are
+ * cached once so matching does not allocate three lowercase strings per candidate on every keystroke.
+ */
+internal data class MentionCandidate(val id: String, val longName: String, val shortName: String) {
+    private val normalizedId = id.lowercase()
+    private val normalizedLongName = longName.lowercase()
+    private val normalizedShortName = shortName.lowercase()
+
+    fun matchesNormalizedQuery(query: String): Boolean =
+        normalizedLongName.contains(query) || normalizedShortName.contains(query) || normalizedId.contains(query)
+}
+
+internal fun matchingMentionCandidates(
+    candidates: Collection<MentionCandidate>,
+    query: String,
+    limit: Int = MENTION_SUGGESTION_LIMIT,
+): List<MentionCandidate> = when {
+    limit <= 0 -> emptyList()
+
+    query.isEmpty() -> candidates.take(limit)
+
+    else -> {
+        val normalizedQuery = query.lowercase()
+        candidates.asSequence().filter { it.matchesNormalizedQuery(normalizedQuery) }.take(limit).toList()
+    }
+}
+
+/** Regex-backed inline-markdown style ranges for the live TextField path — avoids the IntelliJ GFM parser. */
+private val LIVE_BOLD = Regex("\\*\\*([^*]+)\\*\\*")
+private val LIVE_ITALIC = Regex("(?<!\\*)\\*([^*]+)\\*(?!\\*)") // single *, not part of **
+private val LIVE_STRIKE = Regex("~~([^~]+)~~")
+private val LIVE_CODE = Regex("`([^`]+)`")
+
+internal data class LiveStyleSpan(val range: IntRange, val style: InlineStyle)
+
+/**
+ * Detects live-markdown spans in [source] using simple regex patterns instead of a full GFM AST parser.
+ *
+ * The live composer intentionally previews only asterisk emphasis, strikethrough, and inline code. Underscore emphasis
+ * remains raw while editing, but the sent message still uses the full Markdown renderer.
+ */
+internal fun liveInlineMarkdownStyleRanges(source: String): List<LiveStyleSpan> {
+    if (!source.any { it in LIVE_STYLE_DELIMITER_SET }) return emptyList()
+    val codeMatches = LIVE_CODE.findAll(source).toList()
+    // Returns true when either delimiter boundary of this match falls inside a code span. Markdown entirely inside
+    // code, or malformed markdown crossing a code boundary, must not add styling. A code span nested inside outer
+    // emphasis is still allowed, so outer bold text can retain both its bold span and an inner code span.
+    val isBlockedByCodeSpan: (MatchResult) -> Boolean = { match ->
+        codeMatches.any { codeMatch -> match.range.first in codeMatch.range || match.range.last in codeMatch.range }
+    }
+    return buildList {
+        LIVE_BOLD.findAll(source).filterNot(isBlockedByCodeSpan).forEach {
+            add(LiveStyleSpan((it.range.first + 2)..(it.range.last - 2), InlineStyle.Bold))
+        }
+        LIVE_ITALIC.findAll(source).filterNot(isBlockedByCodeSpan).forEach {
+            add(LiveStyleSpan((it.range.first + 1)..(it.range.last - 1), InlineStyle.Italic))
+        }
+        LIVE_STRIKE.findAll(source).filterNot(isBlockedByCodeSpan).forEach {
+            add(LiveStyleSpan((it.range.first + 2)..(it.range.last - 2), InlineStyle.Strikethrough))
+        }
+        codeMatches.forEach { add(LiveStyleSpan((it.range.first + 1)..(it.range.last - 1), InlineStyle.Code)) }
+    }
+        .sortedWith(compareBy<LiveStyleSpan>({ it.range.first }, { it.range.last }, { it.style.ordinal }))
+}
+
+private val LIVE_STYLE_DELIMITER_SET = setOf('*', '~', '`')
+
+internal data class MentionReplacement(val range: IntRange, val text: String)
+
+internal data class MentionOutputPlan(val replacements: List<MentionReplacement>, val styleSpans: List<LiveStyleSpan>)
+
+/**
+ * Builds presentation edits from the immutable source buffer. Markdown is parsed before friendly-name replacement so
+ * display names containing `*`, `~`, or backticks cannot introduce formatting that was not present in the stored text.
+ */
+internal fun mentionOutputPlan(source: String, candidatesById: Map<String, MentionCandidate>): MentionOutputPlan {
+    val replacements =
+        MENTION_TOKEN_REGEX.findAll(source)
+            .mapNotNull { match ->
+                val candidate = candidatesById[match.groupValues[1]] ?: return@mapNotNull null
+                MentionReplacement(match.range, "@" + candidate.longName.ifEmpty { candidate.shortName })
+            }
+            .toList()
+    val styleSpans = remapStyleSpans(liveInlineMarkdownStyleRanges(source), replacements)
+    return MentionOutputPlan(replacements, styleSpans)
+}
+
+/** Remaps source-buffer style ranges through non-overlapping mention replacements. */
+internal fun remapStyleSpans(spans: List<LiveStyleSpan>, replacements: List<MentionReplacement>): List<LiveStyleSpan> {
+    if (spans.isEmpty() || replacements.isEmpty()) return spans
+    val sortedReplacements = replacements.sortedBy { it.range.first }
+    return spans.mapNotNull { span ->
+        val start = remapBoundary(span.range.first, sortedReplacements, preferReplacementEnd = false)
+        val endExclusive = remapBoundary(span.range.last + 1, sortedReplacements, preferReplacementEnd = true)
+        if (start >= endExclusive) null else span.copy(range = start until endExclusive)
+    }
+}
+
+private fun remapBoundary(
+    sourceOffset: Int,
+    replacements: List<MentionReplacement>,
+    preferReplacementEnd: Boolean,
+): Int {
+    var delta = 0
+    var mappedOffset: Int? = null
+    val iterator = replacements.iterator()
+    while (iterator.hasNext() && mappedOffset == null) {
+        val replacement = iterator.next()
+        val sourceStart = replacement.range.first
+        val sourceEndExclusive = replacement.range.last + 1
+        mappedOffset =
+            when {
+                sourceOffset <= sourceStart -> sourceOffset + delta
+
+                sourceOffset < sourceEndExclusive ->
+                    sourceStart + delta + if (preferReplacementEnd) replacement.text.length else 0
+
+                else -> {
+                    delta += replacement.text.length - (sourceEndExclusive - sourceStart)
+                    null
+                }
+            }
+    }
+    return mappedOffset ?: sourceOffset + delta
+}
+
+/**
+ * Displays `@!<hex>` tokens as `@FriendlyName` and applies live inline-markdown styling (bold/italic/strikethrough/
+ * code) while typing. Both are presentation-only via [OutputTransformation]: the stored buffer keeps the hex wire form
+ * and the raw markdown delimiters, so the bytes sent are unchanged.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+private fun mentionOutputTransformation(candidatesById: Map<String, MentionCandidate>) = OutputTransformation {
+    val source = toString()
+    // Fast path: plain text with no mention tokens or markdown delimiters — skip all scanning.
+    val hasMention = source.indexOf('@') >= 0
+    val needsStyle = hasMention || source.any { it in LIVE_STYLE_DELIMITER_SET }
+    if (!needsStyle) return@OutputTransformation
+
+    val plan = mentionOutputPlan(source, candidatesById)
+    for (replacement in plan.replacements.asReversed()) {
+        replace(replacement.range.first, replacement.range.last + 1, replacement.text)
+    }
+    for (span in plan.styleSpans) {
+        val spanStyle =
+            when (span.style) {
+                InlineStyle.Bold -> SpanStyle(fontWeight = FontWeight.Bold)
+                InlineStyle.Italic -> SpanStyle(fontStyle = FontStyle.Italic)
+                InlineStyle.Strikethrough -> SpanStyle(textDecoration = TextDecoration.LineThrough)
+                InlineStyle.Code -> SpanStyle(fontFamily = FontFamily.Monospace)
+                InlineStyle.Link -> continue
+            }
+        addStyle(spanStyle, span.range.first, span.range.last + 1)
+    }
+}
+
+/**
+ * The text input field for composing messages.
+ *
+ * @param isEnabled Whether the input field should be enabled.
+ * @param textFieldState The [TextFieldState] managing the input's text.
+ * @param mentionCandidates Identity-stable node-id → mention entry. Only changes when a node's id or display name
+ *   changes — telemetry-only updates leave this map structurally identical, preventing recomposition churn.
+ * @param modifier The modifier for this composable.
+ * @param maxByteSize The maximum allowed size of the message in bytes.
+ * @param onSendMessage Callback invoked when the send button is pressed or send IME action is triggered.
+ */
+@Suppress("LongMethod", "CyclomaticComplexMethod") // Due to multiple parts of the OutlinedTextField
+@Composable
+private fun MessageInput(
+    isEnabled: Boolean,
+    isHomoglyphEncodingEnabled: Boolean,
+    textFieldState: TextFieldState,
+    mentionCandidates: ImmutableMap<String, MentionCandidate>,
+    modifier: Modifier = Modifier,
+    maxByteSize: Int = MESSAGE_CHARACTER_LIMIT_BYTES,
+    onSendMessage: () -> Unit,
+) {
+    val currentTextRaw = textFieldState.text.toString()
+
+    val currentText =
+        if (isHomoglyphEncodingEnabled) {
+            HomoglyphCharacterStringTransformer.optimizeUtf8StringWithHomoglyphs(currentTextRaw)
+        } else {
+            currentTextRaw
+        }
+
+    val currentByteLength =
+        remember(currentText) {
+            // Recalculate only when text changes
+            currentText.encodeToByteArray().size
+        }
+
+    val isOverLimit = currentByteLength > maxByteSize
+    val canSend = !isOverLimit && currentText.isNotEmpty() && isEnabled
+
+    val mentionOutput = remember(mentionCandidates) { mentionOutputTransformation(mentionCandidates) }
+    val mentionQuery by
+        remember(textFieldState) {
+            derivedStateOf { currentMentionQuery(textFieldState.text.toString(), textFieldState.selection) }
+        }
+    val suggestions =
+        remember(mentionQuery, mentionCandidates) {
+            val query = mentionQuery?.query ?: return@remember emptyList<MentionCandidate>()
+            matchingMentionCandidates(mentionCandidates.values, query)
+        }
+
+    // While the mention popup is open, Enter / send completes the top suggestion instead of sending a raw @query.
+    val mentionActive = mentionQuery != null && suggestions.isNotEmpty()
+    fun insertMention(candidate: MentionCandidate) {
+        val q = mentionQuery ?: return
+        textFieldState.edit {
+            val insert = "@${candidate.id} "
+            replace(q.start, q.end, insert)
+            selection = TextRange(q.start + insert.length)
+        }
+    }
+    val onSendAction: () -> Unit = {
+        if (mentionActive) {
+            insertMention(suggestions.first())
+        } else if (canSend) {
+            onSendMessage()
+        }
+    }
+
+    var isFocused by remember { mutableStateOf(false) }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        if (mentionActive) {
+            MentionSuggestions(suggestions = suggestions, onPick = ::insertMention)
+        }
+        OutlinedTextField(
+            modifier =
+            Modifier.fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .onFocusChanged { isFocused = it.isFocused }
+                .onKeyEvent { keyEvent ->
+                    val isEnterNoShift = keyEvent.key == Key.Enter && !keyEvent.isShiftPressed
+                    if (isEnterNoShift) {
+                        if (keyEvent.type == KeyEventType.KeyUp) onSendAction()
+                        true // consume both KeyDown and KeyUp to prevent newline insertion
+                    } else {
+                        false
+                    }
+                },
+            state = textFieldState,
+            outputTransformation = mentionOutput,
+            lineLimits = TextFieldLineLimits.MultiLine(1, MAX_LINES),
+            enabled = isEnabled,
+            shape = RoundedCornerShape(ROUNDED_CORNER_PERCENT.toFloat()),
+            isError = isOverLimit,
+            placeholder = { Text(stringResource(Res.string.type_a_message)) },
+            keyboardOptions =
+            KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Send),
+            onKeyboardAction = { onSendAction() },
+            supportingText = {
+                // The counter is only useful as the limit approaches. Showing 0/200 before a character is typed is
+                // chrome that every chat client has learned to hide.
+                if (isEnabled && currentByteLength >= maxByteSize - COUNTER_VISIBLE_WITHIN_BYTES) {
+                    Text(
+                        text = "$currentByteLength/$maxByteSize",
+                        style = MaterialTheme.typography.bodySmall,
+                        color =
+                        if (isOverLimit) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.End,
+                    )
+                }
+            },
+            // Direct byte limiting via inputTransformation in TextFieldState is complex.
+            // The current approach (show error, disable send) is generally preferred for UX.
+            // If strict real-time byte trimming is required, it needs careful handling of
+            // cursor position and multi-byte characters, likely outside simple inputTransformation.
+            trailingIcon = {
+                // Colour, not just enablement, carries "this will send" — a greyed-out icon reads as broken rather
+                // than as waiting for input.
+                val sendEnabled = isEnabled && (canSend || mentionActive)
+                IconButton(onClick = onSendAction, enabled = sendEnabled) {
+                    Icon(
+                        imageVector = MeshtasticIcons.Send,
+                        contentDescription = stringResource(Res.string.send),
+                        tint =
+                        if (sendEnabled) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            },
+        )
+        // Markdown formatting toolbar — shown once the field is focused and holds enough text to format (iOS parity).
+        if (isEnabled && isFocused && currentText.length >= FORMATTING_TOOLBAR_MIN_CHARS) {
+            FormattingToolbar(state = textFieldState, modifier = Modifier.padding(horizontal = 8.dp))
+        }
+    }
+}
+
+@Composable
+private fun MentionSuggestions(suggestions: List<MentionCandidate>, onPick: (MentionCandidate) -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        tonalElevation = 3.dp,
+        shape = RoundedCornerShape(12.dp),
+    ) {
+        Column {
+            suggestions.forEach { candidate ->
+                Row(
+                    modifier =
+                    Modifier.fillMaxWidth()
+                        .clickable { onPick(candidate) }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = candidate.shortName,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = candidate.longName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@PreviewLightDark
+@Composable
+fun MessageInputPreview() {
+    val mentionCandidates = persistentMapOf<String, MentionCandidate>()
+    AppTheme {
+        Surface {
+            Column(modifier = Modifier.padding(8.dp)) {
+                MessageInput(
+                    isEnabled = true,
+                    isHomoglyphEncodingEnabled = false,
+                    mentionCandidates = mentionCandidates,
+                    textFieldState = rememberTextFieldState("Hello"),
+                    onSendMessage = {},
+                )
+                Spacer(Modifier.size(16.dp))
+                MessageInput(
+                    isEnabled = false,
+                    isHomoglyphEncodingEnabled = false,
+                    mentionCandidates = mentionCandidates,
+                    textFieldState = rememberTextFieldState("Disabled"),
+                    onSendMessage = {},
+                )
+                Spacer(Modifier.size(16.dp))
+                MessageInput(
+                    isEnabled = true,
+                    isHomoglyphEncodingEnabled = false,
+                    mentionCandidates = mentionCandidates,
+                    textFieldState =
+                    rememberTextFieldState(
+                        "A very long message that might exceed the byte limit " +
+                            "and cause an error state display for the user to see clearly.",
+                    ),
+                    onSendMessage = {},
+                    maxByteSize = 50, // Test with a smaller limit
+                )
+                Spacer(Modifier.size(16.dp))
+                // Test Japanese characters (multi-byte)
+                MessageInput(
+                    isEnabled = true,
+                    isHomoglyphEncodingEnabled = false,
+                    mentionCandidates = mentionCandidates,
+                    textFieldState = rememberTextFieldState("こんにちは世界"), // Hello World in Japanese
+                    onSendMessage = {},
+                    maxByteSize = 10,
+                    // Each char is 3 bytes, so "こん" (6 bytes) is ok, "こんに" (9 bytes) is ok, "こんにち"
+                    // (12 bytes) is over
+                )
+            }
+        }
+    }
+}

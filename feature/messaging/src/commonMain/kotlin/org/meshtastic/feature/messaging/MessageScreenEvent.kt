@@ -1,0 +1,70 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.feature.messaging
+
+import org.meshtastic.core.model.Message
+import org.meshtastic.core.model.Node
+import org.meshtastic.core.model.media.ActionTargetMode
+
+/** Defines the various user interactions that can occur on the MessageScreen. */
+internal sealed interface MessageScreenEvent {
+    /** Translate a message into the device language (the translation is persisted). */
+    data class TranslateMessage(val message: Message) : MessageScreenEvent
+
+    /** Toggle a translated message between showing the original and the translated text. */
+    data class ToggleShowTranslated(val message: Message) : MessageScreenEvent
+
+    /** Send a new text message. */
+    data class SendMessage(val text: String, val replyingToPacketId: Int? = null) : MessageScreenEvent
+
+    /** Send an emoji reaction to a specific message. */
+    data class SendReaction(val emoji: String, val messageId: Int) : MessageScreenEvent
+
+    /** Delete one or more selected messages. */
+    data class DeleteMessages(val ids: List<Long>) : MessageScreenEvent
+
+    /** Mark messages up to a certain message as read. */
+    data class ClearUnreadCount(val messageUuid: Long, val lastReadTimestamp: Long) : MessageScreenEvent
+
+    /** Handle an action from a node's context menu. */
+    data class NodeDetails(val node: Node) : MessageScreenEvent
+
+    /** Set the title of the screen (typically the contact or channel name). */
+    data class SetTitle(val title: String) : MessageScreenEvent
+
+    /** Navigate to the details screen for a specific node. */
+    data class NavigateToNodeDetails(val nodeNum: Int) : MessageScreenEvent
+
+    /** Navigate back to the previous screen. */
+    data object NavigateBack : MessageScreenEvent
+
+    /** Copy the given text to the clipboard. */
+    data class CopyToClipboard(val text: String) : MessageScreenEvent
+
+    /** Send a PTT voice note (Codec 2 700bps). */
+    data class SendVoiceNote(val durationSeconds: Int, val audioBytes: ByteArray? = null) : MessageScreenEvent
+
+    /** Send a 1-bit compressed image attachment with optional caption. */
+    data class SendImageAttachment(val mediaPath: String, val caption: String? = null) : MessageScreenEvent
+
+    /** Send a remote PC system command or AI query. */
+    data class SendPcCommand(
+        val command: String,
+        val targetMode: ActionTargetMode = ActionTargetMode.WSL,
+        val imagePayload: ByteArray? = null,
+    ) : MessageScreenEvent
+}

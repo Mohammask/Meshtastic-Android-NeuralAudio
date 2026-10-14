@@ -1,0 +1,664 @@
+name: Reusable Android Check
+
+on:
+  workflow_call:
+    inputs:
+      run_lint:
+        type: boolean
+        default: true
+      run_screenshot_tests:
+        type: boolean
+        default: true
+      run_unit_tests:
+        type: boolean
+        default: true
+      run_android_build:
+        type: boolean
+        default: true
+      run_coverage:
+        type: boolean
+        default: true
+      run_desktop_builds:
+        type: boolean
+        default: false
+      upload_artifacts:
+        type: boolean
+        default: true
+    secrets:
+      GRADLE_ENCRYPTION_KEY:
+        required: false
+      DEVELOCITY_ACCESS_KEY:
+        required: false
+      CODECOV_TOKEN:
+        required: false
+      DATADOG_APPLICATION_ID:
+        required: false
+      DATADOG_CLIENT_TOKEN:
+        required: false
+      # Debug-only Maps key -- deliberately not the release GOOGLE_MAPS_API_KEY that
+      # release.yml uses. See the "Load Maps API key" step in android-check for why
+      # the two must stay separate.
+      GOOGLE_MAPS_API_KEY_DEBUG:
+        required: false
+      GSERVICES:
+        required: false
+
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+  # Only main writes the Gradle caches. merge_group scopes are throwaway branches
+  # (per gradle/actions docs) — writes there had no reader.
+  GRADLE_CACHE_READ_ONLY: ${{ github.ref == 'refs/heads/main' && 'false' || 'true' }}
+  # Job summary as a PR comment on failure; no-ops on fork PRs (read-only token).
+  GRADLE_PR_COMMENT: ${{ github.event_name == 'pull_request' && 'on-failure' || 'never' }}
+
+jobs:
+  # There is deliberately no fan-in "setup" job here. Every heavy job used to
+  # `needs:` one, which serialized TWO runner-queue waits per run — under pool
+  # congestion the setup job alone sat queued for ~10 minutes before the real
+  # jobs could even enter the queue. Its two outputs are now sourced without a
+  # job: cache writability is the pure expression above, and the versionCode
+  # comes from one of two places:
+  #   - Jobs whose artifacts ship (android-check, build-desktop,
+  #     build-flatpak-src) check out full — blob-less — history so the build's
+  #     GitVersionValueSource derives the real commit-count versionCode.
+  #   - Validation-only jobs (lint, screenshot, test shards) pin VERSION_CODE
+  #     to a constant instead: their outputs are never shipped, and the real
+  #     value changes on every commit, which poisons the versionCode-dependent
+  #     task chain (BuildConfig -> compile -> test/lint) in the build cache.
+  #     A stable value keeps those cache keys identical across commits so
+  #     unchanged modules resolve FROM-CACHE on every run. Keep the pinned
+  #     value (30000000) identical across the three jobs for the same reason.
+
+  # ── Lint & Static Analysis ──────────────────────────────────────────
+  lint-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 30
+    if: inputs.run_lint == true
+    env:
+      VERSION_CODE: 30000000 # pinned for cache stability -- see comment above
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history: spotless ratchetFrom("origin/main") diffs against main.
+          fetch-depth: 0
+          filter: 'blob:none'
+          submodules: true
+
+      - name: Gradle Setup
+        uses: ./.github/actions/gradle-setup
+        with:
+          gradle_encryption_key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          develocity_access_key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+          job_summary_pr_comment: ${{ env.GRADLE_PR_COMMENT }}
+          cache_read_only: ${{ env.GRADLE_CACHE_READ_ONLY }}
+          # Disabled on Gradle 9.7.1: restoring an entry written by another runner crashes
+          # fingerprint deserialization (IsInIdeaSyncValueSource CNFE, settings-plugin
+          # classloader scope) and the job dies in ~10s before any test. A cross-machine
+          # restore is the only thing that triggers it, so it is 100% red in CI and not
+          # reproducible from a local store/reuse pair. Re-enable when that is fixed
+          # upstream; VERSION_CODE is still pinned above so entries would reuse.
+          cache_configuration_cache: 'false'
+          install_jetbrains_jdk: 'true'
+
+      - name: Lint, Analysis & KMP Smoke Compile
+        run: ./gradlew spotlessCheck detekt androidApp:lintFdroidDebug androidApp:lintGoogleDebug core:barcode:lintFdroidDebug core:barcode:lintGoogleDebug kmpSmokeCompile -Pci=true --continue
+
+  # ── Screenshot Test Validation ──────────────────────────────────────
+  screenshot-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 20
+    if: inputs.run_lint == true && inputs.run_screenshot_tests == true
+    env:
+      VERSION_CODE: 30000000 # pinned for cache stability -- see comment above
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: true
+
+      - name: Gradle Setup
+        uses: ./.github/actions/gradle-setup
+        with:
+          gradle_encryption_key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          develocity_access_key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+          job_summary_pr_comment: ${{ env.GRADLE_PR_COMMENT }}
+          cache_read_only: ${{ env.GRADLE_CACHE_READ_ONLY }}
+          # Disabled on Gradle 9.7.1: restoring an entry written by another runner crashes
+          # fingerprint deserialization (IsInIdeaSyncValueSource CNFE, settings-plugin
+          # classloader scope) and the job dies in ~10s before any test. A cross-machine
+          # restore is the only thing that triggers it, so it is 100% red in CI and not
+          # reproducible from a local store/reuse pair. Re-enable when that is fixed
+          # upstream; VERSION_CODE is still pinned above so entries would reuse.
+          cache_configuration_cache: 'false'
+
+      - name: Screenshot Test Validation
+        # -Dorg.gradle.isolated-projects=false: AGP's screenshot plugin iterates BuildServicesRegistry at
+        # execution time, which Isolated Projects forbids (fatal since Gradle 9.7).
+        run: ./gradlew :screenshot-tests:validateDebugScreenshotTest -Pci=true -Dorg.gradle.isolated-projects=false
+
+      - name: Upload screenshot diff report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: screenshot-diff-report
+          path: screenshot-tests/build/reports/screenshotTest/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ── Reproducible Build Verification ─────────────────────────────────
+  # Only runs in the merge queue (not PRs, to keep PR feedback fast; not main pushes,
+  # which are the same merge commit the queue just verified).
+  rb-check:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 30
+    if: inputs.run_lint == true && github.event_name == 'merge_group'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: true
+
+      - name: Gradle Setup
+        uses: ./.github/actions/gradle-setup
+        with:
+          gradle_encryption_key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          develocity_access_key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+          job_summary_pr_comment: ${{ env.GRADLE_PR_COMMENT }}
+          cache_read_only: 'true'
+
+      - name: Verify Reproducible Build (fdroid)
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: ./scripts/verify-rb.sh
+
+  # ── Sharded Unit Tests ──────────────────────────────────────────────
+  # Tests are split into 3 shards that run in parallel. Module assignment is
+  # balance-driven (measured test-execution time), not purely semantic: the
+  # three heaviest core modules (:core:database ~135s, :core:service ~119s,
+  # :core:network ~66s) are placed in the lighter shards so all three finish
+  # in roughly the same wall time. shard-app already compiles the full
+  # dependency graph (androidApp depends on everything), so hosting extra
+  # core-module tests there costs only their execution time.
+  # These lists are hand-maintained; pull-request.yml's check-changes job
+  # guards them against drift (every module in settings.gradle.kts with test
+  # sources must appear here or be explicitly exempted).
+  #   shard-core:    remaining core:* KMP module tests (allTests)
+  #   shard-feature: feature:* KMP module tests + :core:service
+  #   shard-app:     Pure-Android/JVM tests (androidApp, desktopApp,
+  #                  core:barcode, feature:widget)
+  #                  + :core:database + :core:network
+  test-shards:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 45
+    if: inputs.run_unit_tests == true
+    env:
+      VERSION_CODE: 30000000 # pinned for cache stability -- see comment above
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: shard-core
+            tasks: >-
+              :core:ble:allTests
+              :core:common:allTests
+              :core:data:allTests
+              :core:datastore:allTests
+              :core:domain:allTests
+              :core:konsist:allTests
+              :core:model:allTests
+              :core:navigation:allTests
+              :core:prefs:allTests
+              :core:repository:allTests
+              :core:takserver:allTests
+              :core:testing:allTests
+              :core:ui:allTests
+            kover: >-
+              :core:ble:koverXmlReport
+              :core:common:koverXmlReport
+              :core:data:koverXmlReport
+              :core:datastore:koverXmlReport
+              :core:domain:koverXmlReport
+              :core:konsist:koverXmlReport
+              :core:model:koverXmlReport
+              :core:navigation:koverXmlReport
+              :core:prefs:koverXmlReport
+              :core:repository:koverXmlReport
+              :core:takserver:koverXmlReport
+              :core:testing:koverXmlReport
+              :core:ui:koverXmlReport
+          - name: shard-feature
+            tasks: >-
+              :core:service:allTests
+              :feature:connections:allTests
+              :feature:discovery:allTests
+              :feature:docs:allTests
+              :feature:firmware:allTests
+              :feature:intro:allTests
+              :feature:map:allTests
+              :feature:map-maplibre:allTests
+              :feature:map-terrain:allTests
+              :feature:messaging:allTests
+              :feature:node:allTests
+              :feature:settings:allTests
+              :feature:wifi-provision:allTests
+            kover: >-
+              :core:service:koverXmlReport
+              :feature:connections:koverXmlReport
+              :feature:discovery:koverXmlReport
+              :feature:docs:koverXmlReport
+              :feature:firmware:koverXmlReport
+              :feature:intro:koverXmlReport
+              :feature:map:koverXmlReport
+              :feature:map-maplibre:koverXmlReport
+              :feature:map-terrain:koverXmlReport
+              :feature:messaging:koverXmlReport
+              :feature:node:koverXmlReport
+              :feature:settings:koverXmlReport
+              :feature:wifi-provision:koverXmlReport
+          - name: shard-app
+            tasks: >-
+              :androidApp:testFdroidDebugUnitTest
+              :androidApp:testGoogleDebugUnitTest
+              :desktopApp:test
+              :core:barcode:testFdroidDebugUnitTest
+              :core:barcode:testGoogleDebugUnitTest
+              :core:database:allTests
+              :core:network:allTests
+              :feature:widget:testDebugUnitTest
+            kover: >-
+              :androidApp:koverXmlReportFdroidDebug
+              :androidApp:koverXmlReportGoogleDebug
+              :core:barcode:koverXmlReportFdroidDebug
+              :core:barcode:koverXmlReportGoogleDebug
+              :desktopApp:koverXmlReport
+              :core:database:koverXmlReport
+              :core:network:koverXmlReport
+              :feature:widget:koverXmlReportDebug
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          submodules: true
+
+      - name: Gradle Setup
+        uses: ./.github/actions/gradle-setup
+        with:
+          gradle_encryption_key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          develocity_access_key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+          job_summary_pr_comment: ${{ env.GRADLE_PR_COMMENT }}
+          cache_read_only: ${{ env.GRADLE_CACHE_READ_ONLY }}
+          # Disabled on Gradle 9.7.1: restoring an entry written by another runner crashes
+          # fingerprint deserialization (IsInIdeaSyncValueSource CNFE, settings-plugin
+          # classloader scope) and the job dies in ~10s before any test. A cross-machine
+          # restore is the only thing that triggers it, so it is 100% red in CI and not
+          # reproducible from a local store/reuse pair. Re-enable when that is fixed
+          # upstream; VERSION_CODE is still pinned above so entries would reuse.
+          cache_configuration_cache: 'false'
+          # Shards run different task graphs; kover flips the graph again.
+          cache_key_suffix: ${{ matrix.shard.name }}${{ inputs.run_coverage && '-kover' || '' }}
+
+      - name: Run Tests & Coverage (${{ matrix.shard.name }})
+        run: |
+          kover_tasks=""
+          if [[ "${{ inputs.run_coverage }}" == "true" ]]; then
+            kover_tasks="${{ matrix.shard.kover }}"
+          fi
+          # CCUD tags every shard with the same `CI job=test-shards`, which is the largest
+          # single CI cost bucket and therefore the one worth splitting. Shard identity is
+          # otherwise only recoverable by parsing the requested task list.
+          ./gradlew ${{ matrix.shard.tasks }} $kover_tasks -Pci=true --continue \
+            "-Dscan.value.CI shard=${{ matrix.shard.name }}"
+
+      # Flags are tagged by logical module group (core/feature/app/desktop), matching
+      # codecov.yml's flags/component_management — NOT by shard name. Shards are a CI
+      # load-balancing detail; which shard happens to run a module must not change
+      # which Codecov flag its coverage lands under.
+      - name: Upload test results to Codecov (core)
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: core
+          fail_ci_if_error: false
+          disable_search: true
+          report_type: test_results
+          files: "core/**/build/test-results/**/*.xml"
+
+      - name: Upload test results to Codecov (feature)
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: feature
+          fail_ci_if_error: false
+          disable_search: true
+          report_type: test_results
+          files: "feature/**/build/test-results/**/*.xml"
+
+      - name: Upload test results to Codecov (app)
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: app
+          fail_ci_if_error: false
+          disable_search: true
+          report_type: test_results
+          files: "androidApp/build/test-results/**/*.xml"
+
+      - name: Upload test results to Codecov (desktop)
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: desktop
+          fail_ci_if_error: false
+          disable_search: true
+          report_type: test_results
+          files: "desktopApp/build/test-results/**/*.xml"
+
+      - name: Upload coverage to Codecov (core)
+        if: ${{ !cancelled() && inputs.run_coverage }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: core
+          fail_ci_if_error: false
+          disable_search: true
+          files: "core/**/build/reports/kover/report*.xml"
+
+      - name: Upload coverage to Codecov (feature)
+        if: ${{ !cancelled() && inputs.run_coverage }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: feature
+          fail_ci_if_error: false
+          disable_search: true
+          files: "feature/**/build/reports/kover/report*.xml"
+
+      - name: Upload coverage to Codecov (app)
+        if: ${{ !cancelled() && inputs.run_coverage }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: app
+          fail_ci_if_error: false
+          disable_search: true
+          files: "androidApp/build/reports/kover/report*.xml"
+
+      - name: Upload coverage to Codecov (desktop)
+        if: ${{ !cancelled() && inputs.run_coverage }}
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: meshtastic/Meshtastic-Android
+          flags: desktop
+          fail_ci_if_error: false
+          disable_search: true
+          files: "desktopApp/build/reports/kover/report*.xml"
+
+      - name: Upload shard reports
+        # !cancelled(), not always(): a shard cancelled before Gradle ran has no
+        # reports, and the upload warns "No files were found" on the way out.
+        if: ${{ !cancelled() && inputs.upload_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reports-${{ matrix.shard.name }}
+          path: |
+            **/build/reports
+            **/build/test-results
+          retention-days: 7
+
+  # ── Android Build ────────────────────────────────────────────────────
+  # Also generates the dependency graph — assembling both flavors resolves the widest set.
+  android-check:
+    runs-on: ubuntu-24.04
+    # No permissions block on purpose: inherits the caller's. main grants contents: write
+    # (graph submit); PRs grant read (upload only).
+    timeout-minutes: 60
+    if: inputs.run_android_build == true
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: 'blob:none'
+          submodules: true
+
+      - name: Gradle Setup
+        uses: ./.github/actions/gradle-setup
+        with:
+          gradle_encryption_key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          develocity_access_key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+          job_summary_pr_comment: ${{ env.GRADLE_PR_COMMENT }}
+          cache_read_only: ${{ env.GRADLE_CACHE_READ_ONLY }}
+          # main submits; PRs upload (no contents: write), dependency-graph-submit.yml finishes.
+          dependency_graph: ${{ github.event_name == 'pull_request' && 'generate-and-upload' || (github.ref == 'refs/heads/main' && 'generate-and-submit' || 'disabled') }}
+
+      - name: Tag main-branch builds as -SNAPSHOT
+        if: github.event_name == 'push'
+        run: |
+          BASE=$(grep '^VERSION_NAME_BASE=' config.properties | cut -d'=' -f2)
+          echo "VERSION_NAME=${BASE}-SNAPSHOT" >> "$GITHUB_ENV"
+
+      # androidApp/src/google/AndroidManifest.xml resolves ${MAPS_API_KEY} from the secrets
+      # plugin. With nothing injected the build falls back to secrets.defaults.properties'
+      # placeholder DEFAULT_API_KEY, so every snapshot/PR google-flavor APK shipped a blank
+      # map (#6883) -- the very flavor docs/en/developer/test-builds.md tells testers to use.
+      #
+      # google.properties, not secrets.properties: the plugin injects the latter into EVERY
+      # variant, so the fdroid APK -- which has no Maps code at all -- embedded the real key
+      # too. The plugin reads <flavorName>.properties, so this reaches google variants only.
+      #
+      # A debug-only key, never the release one: config/debug.keystore is checked in
+      # (#6615), so the debug applicationId + SHA-1 pair every debug APK presents is
+      # forgeable by anyone who clones this repo. Pointing it at the production key
+      # would hand production Maps quota to the world; the debug key is restricted to
+      # those debug coordinates and quota-capped on its own.
+      #
+      # Unset -- fork PRs receive no secrets -- leaves today's placeholder behaviour.
+      - name: Load Maps API key for google-flavor debug builds
+        env:
+          GOOGLE_MAPS_API_KEY_DEBUG: ${{ secrets.GOOGLE_MAPS_API_KEY_DEBUG }}
+        run: |
+          if [ -n "$GOOGLE_MAPS_API_KEY_DEBUG" ]; then
+            echo "MAPS_API_KEY=$GOOGLE_MAPS_API_KEY_DEBUG" >> ./google.properties
+            echo "Injected debug Maps API key into google.properties."
+          else
+            echo "::warning::GOOGLE_MAPS_API_KEY_DEBUG is unset (fork PR, or the secret is not configured yet) -- the google-flavor map will be blank."
+          fi
+
+      # androidApp/google-services.json is a tracked *placeholder* (project_id "xxx"); the real
+      # config only ever landed via release.yml. AnalyticsConventionPlugin applies the
+      # google-services and crashlytics plugins for the google flavor on every build type, so
+      # snapshot and PR debug APKs initialised Firebase against a project that does not exist and
+      # reported nothing -- while docs/en/developer/test-builds.md recommends that flavor to
+      # testers precisely because "crashes and errors get reported back". Crash collection stays
+      # runtime-gated on the user's consent either way (see GooglePlatformAnalytics).
+      #
+      # Unset -- fork PRs receive no secrets -- leaves the placeholder in place.
+      - name: Load Firebase config for google-flavor debug builds
+        env:
+          GSERVICES: ${{ secrets.GSERVICES }}
+        run: |
+          if [ -n "$GSERVICES" ]; then
+            rm -f ./androidApp/google-services.json
+            echo "$GSERVICES" > ./androidApp/google-services.json
+            echo "Injected the real google-services.json."
+          else
+            echo "::warning::GSERVICES is unset (fork PR, or the secret is not configured) -- Firebase reporting will be inert in these builds."
+          fi
+
+      # Same gap as the Maps key (#6883) and the Firebase config: secrets.defaults.properties
+      # ships fake datadog tokens and only release.yml ever wrote real ones, so snapshot and
+      # PR debug APKs reported nothing to Datadog.
+      #
+      # google.properties for the same reason as the Maps key above: Datadog code lives only
+      # in androidApp/src/google, but a secrets.properties write reaches every variant and
+      # would embed these tokens in the fdroid APK as well.
+      #
+      # This traffic stays separable from production: GooglePlatformAnalytics initialises the
+      # SDK with env "Local" for debuggable builds (vs "Production") and variant "google", and
+      # main-branch builds additionally carry -SNAPSHOT in the RUM version via VERSION_NAME.
+      # Collection is still gated on the user's analytics consent at runtime.
+      #
+      # Unset -- fork PRs receive no secrets -- leaves the fake tokens in place.
+      - name: Load Datadog tokens for google-flavor debug builds
+        env:
+          DATADOG_APPLICATION_ID: ${{ secrets.DATADOG_APPLICATION_ID }}
+          DATADOG_CLIENT_TOKEN: ${{ secrets.DATADOG_CLIENT_TOKEN }}
+        run: |
+          if [ -n "$DATADOG_APPLICATION_ID" ] && [ -n "$DATADOG_CLIENT_TOKEN" ]; then
+            {
+              echo "datadogApplicationId=$DATADOG_APPLICATION_ID"
+              echo "datadogClientToken=$DATADOG_CLIENT_TOKEN"
+            } >> ./google.properties
+            echo "Injected Datadog tokens into google.properties."
+          else
+            echo "::warning::Datadog secrets are unset (fork PR, or not configured) -- Datadog reporting will be inert in these builds."
+          fi
+
+      - name: Build Android APKs
+        # -Dorg.gradle.isolated-projects=false: the dependency-graph plugin injected by setup-gradle force-resolves
+        # via allprojects{}, which Isolated Projects forbids (fatal since Gradle 9.7). The property form is
+        # used everywhere instead of --no-isolated-projects: that flag only exists on 9.7+, so the property
+        # survives a pin-back below 9.7 without editing this line.
+        run: ./gradlew androidApp:assembleFdroidDebug androidApp:assembleGoogleDebug -Pci=true --parallel --configuration-cache -Dorg.gradle.isolated-projects=false --continue
+
+      # A dependency published for only some of our ABIs builds and installs cleanly and then
+      # crashes with UnsatisfiedLinkError on the others (#7001). Compare the splits here, where
+      # they are already built for every PR.
+      - name: Verify native library ABI parity
+        run: ./scripts/verify-abi-parity.sh
+
+      - name: Upload debug artifact
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: app-debug-apks
+          path: androidApp/build/outputs/apk/*/debug/*.apk
+          retention-days: 7
+
+      - name: Report App Size
+        if: always()
+        run: |
+          {
+            echo "### App Size Report"
+            echo "| Artifact | Size |"
+            echo "| --- | --- |"
+            find androidApp/build/outputs/apk -name "*.apk" -exec du -h {} + | awk '{print "| " $2 " | " $1 " |"}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ── Desktop Build ───────────────────────────────────────────────────
+  build-desktop:
+    name: Build Desktop Debug (${{ matrix.os }})
+    if: inputs.run_desktop_builds == true
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-24.04, ubuntu-24.04-arm]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: 'blob:none'
+          submodules: true
+
+      - name: Gradle Setup
+        uses: ./.github/actions/gradle-setup
+        with:
+          gradle_encryption_key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          develocity_access_key: ${{ secrets.DEVELOCITY_ACCESS_KEY }}
+          job_summary_pr_comment: ${{ env.GRADLE_PR_COMMENT }}
+          cache_read_only: ${{ env.GRADLE_CACHE_READ_ONLY }}
+          install_jetbrains_jdk: 'true'
+
+      - name: Install dependencies for AppImage
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libfuse2t64
+
+      - name: Build Desktop
+        # proguardReleaseJars is included because it is otherwise only exercised by the
+        # release workflow: jlink tolerates a jmods-less JDK (JEP 493) but ProGuard does
+        # not, so a broken packaging JDK would surface at release time instead of here.
+        # packageDistributionForCurrentOS (debug build type, no ProGuard) produces real
+        # installers (dmg/msi+exe/deb+rpm+AppImage-dir) so the snapshot release below can
+        # ship something testers can actually install, not just an unpacked app dir.
+        # Windows only: CMP's WiX packaging reads Project.layout on the root project from
+        # ':desktopApp', which Isolated Projects rejects. Stack, from a --dry-run on
+        # windows-latest against compose-multiplatform 1.12.0:
+        #     WixToolsetKt.configureWix(wixToolset.kt:43)
+        #     ConfigureJvmApplicationKt.configureJvmApplication(configureJvmApplication.kt:46)
+        #     ComposePlugin.apply$lambda$2(ComposePlugin.kt:58)
+        # configureWix only runs where MSI/EXE are target formats, which is why macOS,
+        # ubuntu-24.04 and ubuntu-24.04-arm all package fine with IP on — verified by
+        # running this exact task list unflagged on all four runners. Keep the escape
+        # pinned to the one OS that needs it, and drop it when CMP stops reaching for
+        # the root project.
+        # Both flags go together: IP implies the configuration cache, and Gradle refuses
+        # --no-configuration-cache while IP is still on. Flags, not -D properties —
+        # -Dorg.gradle.isolated-projects=false is inert on windows-latest. --no-isolated-projects
+        # needs Gradle 9.7+, so a pin-back below 9.7 has to revert this line with it.
+        run: >
+          ./gradlew :desktopApp:packageDistributionForCurrentOS :desktopApp:proguardReleaseJars -Pci=true
+          ${{ runner.os == 'Windows' && '--no-isolated-projects --no-configuration-cache' || '' }}
+
+      # CMP's TargetFormat.AppImage is jpackage's "app-image" — an unpacked directory, not
+      # a Linux .AppImage. Wrap it into a real AppImage, same as the release workflow.
+      - name: Build AppImage from jpackage app-image
+        if: runner.os == 'Linux'
+        env:
+          APP_VERSION_NAME: snapshot
+          BINARIES_DIR: desktopApp/build/compose/binaries/main
+        run: scripts/build-appimage.sh
+
+      - name: Upload Desktop artifact
+        if: ${{ inputs.upload_artifacts }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: desktop-app-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            desktopApp/build/compose/binaries/main/*/*.dmg
+            desktopApp/build/compose/binaries/main/*/*.msi
+            desktopApp/build/compose/binaries/main/*/*.exe
+            desktopApp/build/compose/binaries/main/*/*.deb
+            desktopApp/build/compose/binaries/main/*/*.rpm
+            desktopApp/build/compose/binaries/main/*/*.AppImage
+          retention-days: 7
+          if-no-files-found: error

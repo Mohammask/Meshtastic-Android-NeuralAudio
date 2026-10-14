@@ -1,0 +1,436 @@
+[versions]
+xmlutil = "1.0.2.1"
+
+# Android
+agp = "9.4.0"
+appcompat = "1.8.0"
+appfunctions = "1.0.0-alpha11"
+
+# androidx
+androidx-sqlite-bundled = "2.7.0"
+androidx-work = "2.11.2"
+datastore = "1.2.1"
+glance = "1.2.0"
+lifecycle = "2.11.0"
+jetbrains-lifecycle = "2.11.0"
+navigation3 = "1.1.1"
+navigationevent = "1.1.0"
+paging = "3.5.1"
+room = "3.0.2"
+koin = "4.2.2"
+koin-plugin = "1.1.0"
+
+# Kotlin
+kotlin = "2.4.10"
+kotlinx-coroutines-android = "1.11.0"
+kotlinx-datetime = "0.8.0-0.6.x-compat"
+kotlinx-serialization = "1.11.0"
+ktlint = "1.7.1"
+ktfmt = "0.61"
+kover = "0.9.9"
+mokkery = "3.4.2"
+junit5 = "6.1.3"
+junit-platform = "6.1.3" # aligned with junit5 — JUnit Platform uses 1.x scheme
+kotest = "6.2.4"
+konsist = "0.17.3"
+turbine = "1.2.1"
+
+# Compose Screenshot Testing
+compose-screenshot = "0.0.1-alpha16"
+
+# Baseline Profiles / Macrobenchmark
+# `benchmark` drives both the androidx.benchmark macro lib AND the androidx.baselineprofile
+# Gradle plugin (same coordinates/version). Kept on the alpha track to stay compatible with
+# AGP 9.x (the stable 1.4.x line predates AGP 9 support).
+benchmark = "1.5.0-rc02"
+profileinstaller = "1.4.1"
+androidx-uiautomator = "2.4.0"
+
+# Compose Multiplatform
+compose-multiplatform = "1.12.0"
+compose-multiplatform-material3 = "1.12.0-alpha03"
+# `androidx-compose-bom-aligned` tracks androidx.compose.{runtime,ui,foundation,animation}
+# artifacts that ship in lockstep with CMP. Kept as a separate version ref so Renovate
+# can bump androidx releases (which often land first) without dragging the
+# `org.jetbrains.compose:*` artifacts and Gradle plugin to a version JetBrains
+# hasn't published yet (see PR #5180). Should track the AndroidX version that the
+# current `compose-multiplatform` release maps to (see CMP release notes).
+# AndroidCompose.kt's resolutionStrategy force-aligns these groups to *this* version
+# at resolution time, so it is the source of truth for the Android target.
+androidx-compose-bom-aligned = "1.12.0"
+jetbrains-adaptive = "1.3.0-beta02"
+
+# Google
+# The 5.1.1 floor was load-bearing while the app parsed KML through maps-utils: 5.0.0's data.parser
+# KmlParser is compiled against xmlutil 0.91.x's removed policyBuilder(), and the app's xmlutil 1.0.x
+# won conflict resolution, so every KML/KMZ import died with NoSuchMethodError (fatal in prod,
+# 2.8.0–2.8.1). KML is now read by the app's own xmlutil-based converter and that parser is unused, so
+# the pairing — and the canary test that guarded it — is gone. The floor stays as a plain minimum.
+android-maps-utils = "5.2.0"
+maplibre-compose = "0.15.0"
+maps-compose = "8.6.0"
+
+# ML Kit
+mlkit-barcode-scanning = "17.3.0"
+mlkit-genai-prompt = "1.0.0-beta4"
+mlkit-language-id = "17.0.6"
+mlkit-translate = "17.0.3"
+
+# CameraX
+camerax = "1.6.2"
+
+# Networking
+ktor = "3.5.2"
+
+# Other
+aboutlibraries = "15.2.0"
+jserialcomm = "2.11.4"
+coil = "3.6.2"
+datadog-gradle = "1.30.0"
+dd-sdk-android = "3.13.1"
+detekt = "2.0.0-alpha.6"
+dokka = "2.2.0"
+devtools-ksp = "2.3.11"
+firebase-crashlytics-gradle = "3.0.8"
+google-services-gradle = "4.5.0"
+markdown = "0.7.11"
+markdownRenderer = "0.45.0"
+okio = "3.18.2"
+uri-kmp = "0.0.21"
+spotless = "8.10.2"
+vico = "3.3.1"
+kable = "0.44.3"
+mqttastic = "0.8.1"
+jmdns = "3.6.3"
+qrcode-kotlin = "4.5.0"
+takpacket-sdk = "0.9.1"
+meshtastic-protobufs = "2.8.0"
+onnxruntime-android = "1.20.0"
+
+# Gradle Plugins
+ccud = "2.8.0"
+develocity = "4.5.0"
+foojay-resolver = "1.0.0"
+
+
+[libraries]
+xmlutil-core = { module = "io.github.pdvrieze.xmlutil:core", version.ref = "xmlutil" }
+xmlutil-serialization = { module = "io.github.pdvrieze.xmlutil:serialization", version.ref = "xmlutil" }
+
+# AndroidX
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version = "1.13.0" }
+androidx-annotation = { module = "androidx.annotation:annotation", version = "1.10.0" }
+androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "appcompat" }
+androidx-appfunctions = { module = "androidx.appfunctions:appfunctions", version.ref = "appfunctions" }
+androidx-appfunctions-compiler = { module = "androidx.appfunctions:appfunctions-compiler", version.ref = "appfunctions" }
+androidx-camera-core = { module = "androidx.camera:camera-core", version.ref = "camerax" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "camerax" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
+androidx-camera-compose = { module = "androidx.camera:camera-compose", version.ref = "camerax" }
+androidx-camera-viewfinder-compose = { module = "androidx.camera.viewfinder:viewfinder-compose", version = "1.6.2" }
+androidx-core-ktx = { module = "androidx.core:core-ktx", version = "1.19.0" }
+androidx-core-location-altitude = { module = "androidx.core:core-location-altitude", version = "1.0.0" }
+androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version = "1.2.0" }
+androidx-security-crypto = { module = "androidx.security:security-crypto", version = "1.1.0" }
+androidx-datastore = { module = "androidx.datastore:datastore", version.ref = "datastore" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "datastore" }
+androidx-glance-appwidget = { module = "androidx.glance:glance-appwidget", version.ref = "glance" }
+androidx-glance-appwidget-preview = { module = "androidx.glance:glance-appwidget-preview", version.ref = "glance" }
+androidx-glance-appwidget-testing = { module = "androidx.glance:glance-appwidget-testing", version.ref = "glance" }
+androidx-glance-preview = { module = "androidx.glance:glance-preview", version.ref = "glance" }
+androidx-glance-material3 = { module = "androidx.glance:glance-material3", version.ref = "glance" }
+androidx-glance-testing = { module = "androidx.glance:glance-testing", version.ref = "glance" }
+# Android-only lifecycle — no KMP equivalent (use only in androidMain / androidHostTest)
+# lifecycle-runtime-ktx dropped: KTX extensions merged into lifecycle-runtime since 2.8.0;
+# use jetbrains-lifecycle-runtime (JB KMP fork) instead.
+androidx-lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle" }
+# JetBrains KMP lifecycle (use in commonMain and androidMain)
+jetbrains-lifecycle-runtime = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime", version.ref = "jetbrains-lifecycle" }
+jetbrains-lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-runtime-compose", version.ref = "jetbrains-lifecycle" }
+jetbrains-lifecycle-viewmodel-compose = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "jetbrains-lifecycle" }
+jetbrains-lifecycle-viewmodel-navigation3 = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "jetbrains-lifecycle" }
+jetbrains-navigation3-ui = { module = "org.jetbrains.androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+jetbrains-navigationevent-compose = { module = "org.jetbrains.androidx.navigationevent:navigationevent-compose", version.ref = "navigationevent" }
+androidx-paging-common = { module = "androidx.paging:paging-common", version.ref = "paging" }
+androidx-paging-compose = { module = "androidx.paging:paging-compose", version.ref = "paging" }
+androidx-room-compiler = { module = "androidx.room3:room3-compiler", version.ref = "room" }
+androidx-room-paging = { module = "androidx.room3:room3-paging", version.ref = "room" }
+androidx-room-runtime = { module = "androidx.room3:room3-runtime", version.ref = "room" }
+androidx-room-testing = { module = "androidx.room3:room3-testing", version.ref = "room" }
+androidx-sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "androidx-sqlite-bundled" }
+# JVM variant provides the host-platform native library for BundledSQLiteDriver in host/Robolectric tests
+androidx-sqlite-bundled-jvm = { module = "androidx.sqlite:sqlite-bundled-jvm", version.ref = "androidx-sqlite-bundled" }
+androidx-work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "androidx-work" }
+androidx-work-testing = { module = "androidx.work:work-testing", version.ref = "androidx-work" }
+
+# Baseline Profiles / Macrobenchmark
+androidx-profileinstaller = { module = "androidx.profileinstaller:profileinstaller", version.ref = "profileinstaller" }
+androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "androidx-uiautomator" }
+
+# AndroidX Compose (explicit versions — BOM removed; CMP is the sole version authority)
+androidx-compose-runtime-tracing = { module = "androidx.compose.runtime:runtime-tracing", version.ref = "androidx-compose-bom-aligned" }
+androidx-compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest", version.ref = "androidx-compose-bom-aligned" } # Required by Robolectric Compose tests (registers ComponentActivity)
+# M2 `material` rides the same AndroidX train as the bom-aligned compose artifacts, so it shares
+# that ref (stays aligned; Renovate bumps it with the compose group). Requested version-less by
+# maps-compose-widgets (google), declared explicitly so the version propagates to consumers of the
+# app's graph (e.g. :baselineprofile); see androidApp/build.gradle.kts.
+androidx-compose-material = { module = "androidx.compose.material:material", version.ref = "androidx-compose-bom-aligned" }
+androidx-compose-ui-text-google-fonts = { module = "androidx.compose.ui:ui-text-google-fonts", version.ref = "androidx-compose-bom-aligned" }
+
+# Compose Multiplatform
+compose-multiplatform-animation = { module = "org.jetbrains.compose.animation:animation", version.ref = "compose-multiplatform" }
+compose-multiplatform-runtime = { module = "org.jetbrains.compose.runtime:runtime", version.ref = "compose-multiplatform" }
+compose-multiplatform-foundation = { module = "org.jetbrains.compose.foundation:foundation", version.ref = "compose-multiplatform" }
+compose-multiplatform-ui = { module = "org.jetbrains.compose.ui:ui", version.ref = "compose-multiplatform" }
+compose-multiplatform-ui-tooling = { module = "org.jetbrains.compose.ui:ui-tooling", version.ref = "compose-multiplatform" }
+compose-multiplatform-ui-test = { module = "org.jetbrains.compose.ui:ui-test", version.ref = "compose-multiplatform" }
+compose-multiplatform-ui-tooling-preview = { module = "org.jetbrains.compose.ui:ui-tooling-preview", version.ref = "compose-multiplatform" }
+compose-multiplatform-resources = { module = "org.jetbrains.compose.components:components-resources", version.ref = "compose-multiplatform" }
+compose-multiplatform-material3 = { module = "org.jetbrains.compose.material3:material3", version.ref = "compose-multiplatform-material3" }
+
+# JetBrains Material 3 Adaptive (multiplatform — Android, Desktop, iOS)
+jetbrains-compose-material3-adaptive = { module = "org.jetbrains.compose.material3.adaptive:adaptive", version.ref = "jetbrains-adaptive" }
+jetbrains-compose-material3-adaptive-layout = { module = "org.jetbrains.compose.material3.adaptive:adaptive-layout", version.ref = "jetbrains-adaptive" }
+jetbrains-compose-material3-adaptive-navigation = { module = "org.jetbrains.compose.material3.adaptive:adaptive-navigation", version.ref = "jetbrains-adaptive" }
+jetbrains-compose-material3-adaptive-navigation3 = { module = "org.jetbrains.compose.material3.adaptive:adaptive-navigation3", version.ref = "jetbrains-adaptive" }
+jetbrains-compose-material3-adaptive-navigation-suite = { module = "org.jetbrains.compose.material3:material3-adaptive-navigation-suite", version.ref = "compose-multiplatform-material3" }
+
+# Google
+firebase-ai = { module = "com.google.firebase:firebase-ai" }
+firebase-ai-ondevice = { module = "com.google.firebase:firebase-ai-ondevice", version = "16.0.0-beta05" }
+firebase-analytics = { module = "com.google.firebase:firebase-analytics" }
+firebase-bom = { module = "com.google.firebase:firebase-bom", version = "34.18.0" }
+firebase-crashlytics = { module = "com.google.firebase:firebase-crashlytics" }
+location-services = { module = "com.google.android.gms:play-services-location", version = "21.4.0" }
+koin-android = { module = "io.insert-koin:koin-android", version.ref = "koin" }
+koin-androidx-workmanager = { module = "io.insert-koin:koin-androidx-workmanager", version.ref = "koin" }
+koin-compose-viewmodel = { module = "io.insert-koin:koin-compose-viewmodel", version.ref = "koin" }
+koin-core = { module = "io.insert-koin:koin-core", version.ref = "koin" }
+koin-test = { module = "io.insert-koin:koin-test", version.ref = "koin" }
+koin-annotations = { module = "io.insert-koin:koin-annotations", version.ref = "koin" }
+android-maps-utils = { module = "com.google.maps.android:android-maps-utils", version.ref = "android-maps-utils" }
+maplibre-compose = { module = "org.maplibre.compose:maplibre-compose", version.ref = "maplibre-compose" }
+maplibre-compose-material3 = { module = "org.maplibre.compose:maplibre-compose-material3", version.ref = "maplibre-compose" }
+# Android native runtime. 0.15.0 moved Android onto the same maplibre-native FFI stack as desktop,
+# so the MapLibre Android SDK is no longer a transitive dependency and a render backend must be
+# named explicitly. OpenGL ES rather than Vulkan: it is what the pre-0.15 Android SDK used, and it
+# is available on every device our MIN_SDK=26 reaches, whereas the Vulkan backend needs a working
+# Vulkan 1.0 driver. Swap to -vulkan-android to take that path instead.
+maplibre-compose-runtime-opengl-android = { module = "org.maplibre.compose:maplibre-compose-runtime-opengl-android", version.ref = "maplibre-compose" }
+# Desktop-only native runtimes. Each publishes the maplibre-native FFI blob for one OS/arch; the
+# desktopApp picks the one matching the host at packaging time. No macos-x64 artifact is published
+# upstream, which matches our release matrix (macos-latest is arm64).
+maplibre-compose-runtime-metal-macos-arm64 = { module = "org.maplibre.compose:maplibre-compose-runtime-metal-macos-arm64", version.ref = "maplibre-compose" }
+maplibre-compose-runtime-vulkan-linux-arm64 = { module = "org.maplibre.compose:maplibre-compose-runtime-vulkan-linux-arm64", version.ref = "maplibre-compose" }
+maplibre-compose-runtime-vulkan-linux-x64 = { module = "org.maplibre.compose:maplibre-compose-runtime-vulkan-linux-x64", version.ref = "maplibre-compose" }
+maplibre-compose-runtime-vulkan-windows-arm64 = { module = "org.maplibre.compose:maplibre-compose-runtime-vulkan-windows-arm64", version.ref = "maplibre-compose" }
+maplibre-compose-runtime-vulkan-windows-x64 = { module = "org.maplibre.compose:maplibre-compose-runtime-vulkan-windows-x64", version.ref = "maplibre-compose" }
+maps-compose = { module = "com.google.maps.android:maps-compose", version.ref = "maps-compose" }
+maps-compose-utils = { module = "com.google.maps.android:maps-compose-utils", version.ref = "maps-compose" }
+maps-compose-widgets = { module = "com.google.maps.android:maps-compose-widgets", version.ref = "maps-compose" }
+mlkit-barcode-scanning = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkit-barcode-scanning" }
+mlkit-genai-prompt = { module = "com.google.mlkit:genai-prompt", version.ref = "mlkit-genai-prompt" }
+mlkit-language-id = { module = "com.google.mlkit:language-id", version.ref = "mlkit-language-id" }
+mlkit-translate = { module = "com.google.mlkit:translate", version.ref = "mlkit-translate" }
+play-services-maps = { module = "com.google.android.gms:play-services-maps", version = "20.0.0" }
+zxing-core = { module = "com.google.zxing:core", version = "3.5.4" }
+qrcode-kotlin = { module = "io.github.g0dkar:qrcode-kotlin", version.ref = "qrcode-kotlin" }
+
+# Jetbrains
+kotlin-gradlePlugin = { module = "org.jetbrains.kotlin:kotlin-gradle-plugin", version.ref = "kotlin" }
+dokka-gradlePlugin = { module = "org.jetbrains.dokka:dokka-gradle-plugin", version.ref = "dokka" }
+
+kotlinx-collections-immutable = { module = "org.jetbrains.kotlinx:kotlinx-collections-immutable", version = "0.5.2" }
+kotlinx-atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version = "0.33.0" }
+kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinx-coroutines-android" }
+kotlinx-coroutines-swing = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-swing", version.ref = "kotlinx-coroutines-android" }
+kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinx-coroutines-android" }
+kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.ref = "kotlinx-datetime" }
+kotlinx-serialization-core = { module = "org.jetbrains.kotlinx:kotlinx-serialization-core", version.ref = "kotlinx-serialization" }
+kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
+kotlinx-serialization-json-okio = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json-okio", version.ref = "kotlinx-serialization" }
+kotlinx-serialization-protobuf = { module = "org.jetbrains.kotlinx:kotlinx-serialization-protobuf", version.ref = "kotlinx-serialization" }
+# Reads the PMTiles v3 container format (header + directory tree) for the offline terrain extractor and the Google
+# flavor's offline basemap extractor. MIT-licensed; see https://github.com/simonpoole/pmtiles-reader.
+pmtiles-reader = { module = "ch.poole.geo.pmtiles-reader:Reader", version = "0.3.7" }
+onnxruntime-android = { module = "com.microsoft.onnxruntime:onnxruntime-android", version.ref = "onnxruntime-android" }
+
+# Networking
+ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+ktor-client-java = { module = "io.ktor:ktor-client-java", version.ref = "ktor" }
+ktor-client-logging = { module = "io.ktor:ktor-client-logging", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+ktor-network = { module = "io.ktor:ktor-network", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
+
+# Testing
+androidx-test-core = { module = "androidx.test:core", version = "1.7.0" }
+androidx-test-ext-junit = { module = "androidx.test.ext:junit", version = "1.3.0" }
+androidx-test-runner = { module = "androidx.test:runner", version = "1.7.0" }
+androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version = "3.7.0" }
+junit = { module = "junit:junit", version = "4.13.2" }
+junit-vintage-engine = { module = "org.junit.vintage:junit-vintage-engine", version.ref = "junit5" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher", version.ref = "junit-platform" }
+kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+kotest-property = { module = "io.kotest:kotest-property", version.ref = "kotest" }
+konsist = { module = "com.lemonappdev:konsist", version.ref = "konsist" }
+robolectric = { module = "org.robolectric:robolectric", version = "4.16.1" }
+turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
+
+# Other
+aboutlibraries-core = { module = "com.mikepenz:aboutlibraries-core", version.ref = "aboutlibraries" }
+aboutlibraries-compose-m3 = { module = "com.mikepenz:aboutlibraries-compose-m3", version.ref = "aboutlibraries" }
+coil = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
+coil-network-ktor3 = { module = "io.coil-kt.coil3:coil-network-ktor3", version.ref = "coil" }
+coil-svg = { module = "io.coil-kt.coil3:coil-svg", version.ref = "coil" }
+
+dd-sdk-android-logs = { module = "com.datadoghq:dd-sdk-android-logs", version.ref = "dd-sdk-android" }
+dd-sdk-android-okhttp = { module = "com.datadoghq:dd-sdk-android-okhttp", version.ref = "dd-sdk-android" }
+dd-sdk-android-rum = { module = "com.datadoghq:dd-sdk-android-rum", version.ref = "dd-sdk-android" }
+dd-sdk-android-session-replay = { module = "com.datadoghq:dd-sdk-android-session-replay", version.ref = "dd-sdk-android" }
+dd-sdk-android-trace = { module = "com.datadoghq:dd-sdk-android-trace", version.ref = "dd-sdk-android" }
+dd-sdk-android-trace-otel = { module = "com.datadoghq:dd-sdk-android-trace-otel", version.ref = "dd-sdk-android" }
+dokka-android-documentation-plugin = { module = "org.jetbrains.dokka:android-documentation-plugin", version.ref = "dokka" }
+jetbrains-markdown = { module = "org.jetbrains:markdown", version.ref = "markdown" }
+markdown-renderer = { module = "com.mikepenz:multiplatform-markdown-renderer", version.ref = "markdownRenderer" }
+markdown-renderer-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "markdownRenderer" }
+markdown-renderer-android = { module = "com.mikepenz:multiplatform-markdown-renderer-android", version.ref = "markdownRenderer" }
+
+kable-core = { module = "com.juul.kable:kable-core", version.ref = "kable" }
+# mqtt-client 0.4.0 split the monolith into a BOM + core + per-transport modules. The BOM pins the
+# versions, so core/transport stay versionless. Both transports are wired: transport-tcp (tcp://-/ssl://,
+# the default) and transport-ws (for user-entered ws://-/wss:// broker addresses).
+meshtastic-mqtt-client-bom = { module = "org.meshtastic:mqtt-client-bom", version.ref = "mqttastic" }
+meshtastic-mqtt-client-core = { module = "org.meshtastic:mqtt-client-core" }
+meshtastic-mqtt-client-transport-tcp = { module = "org.meshtastic:mqtt-client-transport-tcp" }
+meshtastic-mqtt-client-transport-ws = { module = "org.meshtastic:mqtt-client-transport-ws" }
+
+jserialcomm = { module = "com.fazecast:jSerialComm", version.ref = "jserialcomm" }
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", version.ref = "okio" }
+uri-kmp = { module = "com.eygraber:uri-kmp", version.ref = "uri-kmp" }
+kermit = { module = "co.touchlab:kermit", version = "2.1.0" }
+# Debug-only leak/GC-thrash detector -- see feature/settings/.../debugging/DebugViewModel.kt and
+# core/data/.../manager/MeshMessageProcessorImpl.kt for the adversarial-mesh-fuzz bugs this class of
+# tooling is meant to catch going forward. Stable release (not the 3.0-alpha line).
+leakcanary-android = { module = "com.squareup.leakcanary:leakcanary-android", version = "2.14" }
+
+usb-serial-android = { module = "com.github.mik3y:usb-serial-for-android", version = "3.11.0" }
+vico-compose = { group = "com.patrykandpatrick.vico", name = "compose", version.ref = "vico" }
+vico-compose-m3 = { group = "com.patrykandpatrick.vico", name = "compose-m3", version.ref = "vico" }
+
+# Screenshot Testing
+screenshot-validation-api = { group = "com.android.tools.screenshot", name = "screenshot-validation-api", version.ref = "compose-screenshot" }
+
+# Build Logic
+android-gradleApiPlugin = { module = "com.android.tools.build:gradle-api", version.ref = "agp" }
+android-tools-common = { module = "com.android.tools:common", version = "32.4.0" }
+androidx-room-gradlePlugin = { module = "androidx.room3:room3-gradle-plugin", version.ref = "room" }
+compose-gradlePlugin = { module = "org.jetbrains.kotlin:compose-compiler-gradle-plugin", version.ref = "kotlin" }
+compose-multiplatform-gradlePlugin = { module = "org.jetbrains.compose:compose-gradle-plugin", version.ref = "compose-multiplatform" }
+datadog-gradlePlugin = { module = "com.datadoghq.dd-sdk-android-gradle-plugin:com.datadoghq.dd-sdk-android-gradle-plugin.gradle.plugin", version.ref = "datadog-gradle" }
+compose-screenshot-gradlePlugin = { module = "com.android.compose.screenshot:screenshot-test-gradle-plugin", version.ref = "compose-screenshot" }
+detekt-compose = { module = "io.nlopez.compose.rules:detekt", version = "0.6.6" }
+detekt-formatting = { module = "dev.detekt:detekt-rules-ktlint-wrapper", version.ref = "detekt" }
+detekt-gradlePlugin = { module = "dev.detekt:detekt-gradle-plugin", version.ref = "detekt" }
+firebase-crashlytics-gradlePlugin = { module = "com.google.firebase:firebase-crashlytics-gradle", version.ref = "firebase-crashlytics-gradle" }
+google-services-gradlePlugin = { module = "com.google.gms.google-services:com.google.gms.google-services.gradle.plugin", version.ref = "google-services-gradle" }
+koin-gradlePlugin = { module = "io.insert-koin.compiler.plugin:io.insert-koin.compiler.plugin.gradle.plugin", version.ref = "koin-plugin" }
+mokkery-gradlePlugin = { module = "dev.mokkery:mokkery-gradle", version.ref = "mokkery" }
+kover-gradlePlugin = { module = "org.jetbrains.kotlinx.kover:org.jetbrains.kotlinx.kover.gradle.plugin", version.ref = "kover" }
+ksp-gradlePlugin = { module = "com.google.devtools.ksp:com.google.devtools.ksp.gradle.plugin", version.ref = "devtools-ksp" }
+# KSP resolves this via a detached configuration at task execution time; declared explicitly (core:database)
+# so offline/Flatpak builds can resolve it.
+ksp-symbol-processing-aa-embeddable = { module = "com.google.devtools.ksp:symbol-processing-aa-embeddable", version.ref = "devtools-ksp" }
+serialization-gradlePlugin = { module = "org.jetbrains.kotlin.plugin.serialization:org.jetbrains.kotlin.plugin.serialization.gradle.plugin", version.ref = "kotlin" }
+spotless-gradlePlugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+ccud-gradlePlugin = { module = "com.gradle:common-custom-user-data-gradle-plugin", version.ref = "ccud" }
+develocity-gradlePlugin = { module = "com.gradle:develocity-gradle-plugin", version.ref = "develocity" }
+aboutlibraries-gradlePlugin = { module = "com.mikepenz.aboutlibraries.plugin:aboutlibraries-plugin", version.ref = "aboutlibraries" }
+
+jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
+jna = { module = "net.java.dev.jna:jna", version = "5.19.1" }
+
+# TAK
+takpacket-sdk-kmp = { module = "org.meshtastic:takpacket-sdk", version.ref = "takpacket-sdk" }
+
+# Meshtastic Protobufs SDK (Wire-generated KMP models from meshtastic/protobufs)
+meshtastic-protobufs = { module = "org.meshtastic:protobufs", version.ref = "meshtastic-protobufs" }
+
+
+[bundles]
+# Datadog RUM/telemetry stack — always consumed together (androidApp google flavor)
+dd-sdk-android = [
+    "dd-sdk-android-logs",
+    "dd-sdk-android-okhttp",
+    "dd-sdk-android-rum",
+    "dd-sdk-android-session-replay",
+    "dd-sdk-android-trace",
+    "dd-sdk-android-trace-otel",
+]
+
+
+[plugins]
+# Android
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+android-test = { id = "com.android.test" }
+androidx-baselineprofile = { id = "androidx.baselineprofile", version.ref = "benchmark" }
+compose-screenshot = { id = "com.android.compose.screenshot", version.ref = "compose-screenshot" }
+
+# Jetbrains
+compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "compose-multiplatform" }
+koin-compiler = { id = "io.insert-koin.compiler.plugin", version.ref = "koin-plugin" }
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
+mokkery = { id = "dev.mokkery", version.ref = "mokkery" }
+
+# Google
+devtools-ksp = { id = "com.google.devtools.ksp", version.ref = "devtools-ksp" }
+google-services = { id = "com.google.gms.google-services", version.ref = "google-services-gradle" }
+
+# Firebase
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebase-crashlytics-gradle" }
+
+# Other
+aboutlibraries = { id = "com.mikepenz.aboutlibraries.plugin", version.ref = "aboutlibraries" }
+datadog = { id = "com.datadoghq.dd-sdk-android-gradle-plugin", version.ref = "datadog-gradle" }
+detekt = { id = "dev.detekt", version.ref = "detekt" }
+dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
+room = { id = "androidx.room3", version.ref = "room" }
+spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
+
+develocity = { id = "com.gradle.develocity", version.ref = "develocity" }
+foojay-resolver = { id = "org.gradle.toolchains.foojay-resolver", version.ref = "foojay-resolver" }
+
+# Meshtastic
+meshtastic-android-application = { id = "meshtastic.android.application" }
+meshtastic-android-application-compose = { id = "meshtastic.android.application.compose" }
+meshtastic-android-application-flavors = { id = "meshtastic.android.application.flavors" }
+meshtastic-android-library = { id = "meshtastic.android.library" }
+meshtastic-android-library-compose = { id = "meshtastic.android.library.compose" }
+meshtastic-android-library-flavors = { id = "meshtastic.android.library.flavors" }
+meshtastic-android-room = { id = "meshtastic.android.room" }
+meshtastic-android-screenshot = { id = "meshtastic.android.screenshot" }
+# Vendored google/secrets-gradle-plugin (Isolated-Projects-safe) — see build-logic/convention.
+meshtastic-android-secrets = { id = "meshtastic.android.secrets" }
+meshtastic-detekt = { id = "meshtastic.detekt" }
+meshtastic-docs = { id = "meshtastic.docs" }
+meshtastic-koin = { id = "meshtastic.koin" }
+meshtastic-kover = { id = "meshtastic.kover" }
+meshtastic-kotlinx-serialization = { id = "meshtastic.kotlinx.serialization" }
+meshtastic-kmp-feature = { id = "meshtastic.kmp.feature" }
+meshtastic-kmp-jvm-android = { id = "meshtastic.kmp.jvm.android" }
+meshtastic-kmp-library = { id = "meshtastic.kmp.library" }
+meshtastic-kmp-library-compose = { id = "meshtastic.kmp.library.compose" }
+meshtastic-root = { id = "meshtastic.root" }
+meshtastic-spotless = { id = "meshtastic.spotless" }
+meshtastic-publishing = { id = "meshtastic.publishing" }
+meshtastic-aboutlibraries = { id = "meshtastic.aboutlibraries" }

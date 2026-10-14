@@ -1,0 +1,21 @@
+Meshtastic on avatud lähtekoodiga tööriist Android-seadmetele kasutamiseks, võrguväliste raadiosaatjatega. See rakendus on Meshtastic projekti peamine klient, mis võimaldab sul hallata oma kärgvõrgu seadmeid ja suhelda teiste kasutajatega.
+
+Meshtastic projekti kohta lisateabe saamiseks külasta veebisaiti: <a href="https://www.meshtastic.org">meshtastic.org</a>. Raadioseadmetel töötav püsivara on eraldi avatud lähtekoodiga projekt, mille leiate siit: <a href="https://github.com/meshtastic/Meshtastic-device">https://github.com/meshtastic/Meshtastic-device</a>.
+
+<b>Kogukond ja tugi</b>
+
+See projekt on hetkel beeta arenduses. Võtame meeleldi sinu sõnumeid vastu! Kui sul on küsimusi, tagasisidet või probleeme, palun liitu meie sõbraliku ja aktiivse kogukonnaga:
+
+• <b>Arutelufoorum:</b> <a href="https://github.com/orgs/meshtastic/discussions">https://github.com/orgs/meshtastic/discussions</a>
+• <b>Discord:</b> <a href="https://discord.gg/meshtastic">https://discord.gg/meshtastic</a>
+• <b>Teata probleemist:</b> <a href="https://github.com/meshtastic/Meshtastic-Android/issues">https://github.com/meshtastic/Meshtastic-Android/issues</a>
+
+<b>Dokumentatsioon</b>
+
+Meshtastic rakenduse funktsioonide ja võimaluste kohta vaata meie ametlikku dokumentatsiooni:
+<a href="https://meshtastic.org/docs/">Vaata dokumentatsiooni</a>
+
+<b>Tõlked</b>
+
+Saad Crowdini abil rakendust oma emakeelde tõlkida:
+<a href="https://crowdin.meshtastic.org/android">https://crowdin.meshtastic.org/android</a>

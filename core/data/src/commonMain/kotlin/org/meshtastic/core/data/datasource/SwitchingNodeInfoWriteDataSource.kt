@@ -1,0 +1,79 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.core.data.datasource
+
+import kotlinx.coroutines.withContext
+import org.koin.core.annotation.Single
+import org.meshtastic.core.database.DatabaseProvider
+import org.meshtastic.core.database.entity.MetadataEntity
+import org.meshtastic.core.database.entity.MyNodeEntity
+import org.meshtastic.core.database.entity.NodeEntity
+import org.meshtastic.core.di.CoroutineDispatchers
+
+@Single
+class SwitchingNodeInfoWriteDataSource(
+    private val dbManager: DatabaseProvider,
+    private val dispatchers: CoroutineDispatchers,
+) : NodeInfoWriteDataSource {
+
+    override suspend fun upsert(node: NodeEntity) {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().upsert(node) } }
+    }
+
+    override suspend fun installConfig(mi: MyNodeEntity, nodes: List<NodeEntity>): List<Int> =
+        withContext(dispatchers.io) {
+            // Throw rather than no-op when no database is available: the config-flow manager treats a
+            // successful install as "node DB ready → Connected", and its catch runs the transport
+            // recovery path — silently skipping the install would fake a healthy connection.
+            dbManager.withDb { it.nodeInfoDao().installConfig(mi, nodes) }
+                ?: error("Node DB install skipped: no active database")
+        }
+
+    override suspend fun clearNodeDB(preserveFavorites: Boolean) {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().clearNodeInfo(preserveFavorites) } }
+    }
+
+    override suspend fun clearMyNodeInfo() {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().clearMyNodeInfo() } }
+    }
+
+    override suspend fun deleteNodeAndMetadata(num: Int) {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().deleteNodeAndMetadata(num) } }
+    }
+
+    override suspend fun deleteNodesAndMetadata(nodeNums: List<Int>) {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().deleteNodesAndMetadata(nodeNums) } }
+    }
+
+    override suspend fun upsert(metadata: MetadataEntity) {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().upsert(metadata) } }
+    }
+
+    override suspend fun setNodeNotes(num: Int, notes: String) {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().setNodeNotes(num, notes) } }
+    }
+
+    override suspend fun updatePowerChannelLabel(num: Int, channelIndex: Int, label: String) {
+        withContext(dispatchers.io) {
+            dbManager.withDb { it.nodeInfoDao().updatePowerChannelLabel(num, channelIndex, label) }
+        }
+    }
+
+    override suspend fun backfillDenormalizedNames() {
+        withContext(dispatchers.io) { dbManager.withDb { it.nodeInfoDao().backfillDenormalizedNames() } }
+    }
+}

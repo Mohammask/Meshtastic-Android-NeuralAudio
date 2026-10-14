@@ -1,0 +1,445 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+package org.meshtastic.feature.settings
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import org.jetbrains.compose.resources.stringResource
+import org.meshtastic.core.common.util.UnitsOverride
+import org.meshtastic.core.navigation.DiscoveryRoute
+import org.meshtastic.core.navigation.Route
+import org.meshtastic.core.navigation.SettingsRoute
+import org.meshtastic.core.navigation.WifiProvisionRoute
+import org.meshtastic.core.resources.Res
+import org.meshtastic.core.resources.about
+import org.meshtastic.core.resources.app_settings
+import org.meshtastic.core.resources.app_version
+import org.meshtastic.core.resources.bottom_nav_settings
+import org.meshtastic.core.resources.device_links
+import org.meshtastic.core.resources.discovery_local_mesh
+import org.meshtastic.core.resources.help_and_documentation
+import org.meshtastic.core.resources.info
+import org.meshtastic.core.resources.modules_already_unlocked
+import org.meshtastic.core.resources.modules_unlocked
+import org.meshtastic.core.resources.node_layout_section_title
+import org.meshtastic.core.resources.preferences_language
+import org.meshtastic.core.resources.remotely_administrating
+import org.meshtastic.core.resources.theme
+import org.meshtastic.core.resources.units
+import org.meshtastic.core.resources.wifi_devices
+import org.meshtastic.core.ui.component.ListItem
+import org.meshtastic.core.ui.component.MainAppBar
+import org.meshtastic.core.ui.component.MeshtasticDialog
+import org.meshtastic.core.ui.icon.ChevronRight
+import org.meshtastic.core.ui.icon.Device
+import org.meshtastic.core.ui.icon.Distance
+import org.meshtastic.core.ui.icon.FormatPaint
+import org.meshtastic.core.ui.icon.HelpOutline
+import org.meshtastic.core.ui.icon.Info
+import org.meshtastic.core.ui.icon.Language
+import org.meshtastic.core.ui.icon.List
+import org.meshtastic.core.ui.icon.Memory
+import org.meshtastic.core.ui.icon.MeshtasticIcons
+import org.meshtastic.core.ui.icon.PermScanWifi
+import org.meshtastic.core.ui.icon.Speaker
+import org.meshtastic.core.ui.icon.Wifi
+import org.meshtastic.core.ui.util.rememberShowToastResource
+import org.meshtastic.feature.settings.component.AudioCodecPickerDialog
+import org.meshtastic.feature.settings.component.CacheLimitPreference
+import org.meshtastic.feature.settings.component.ExpressiveSection
+import org.meshtastic.feature.settings.component.FullMessageTimestampsSetting
+import org.meshtastic.feature.settings.component.HomoglyphSetting
+import org.meshtastic.feature.settings.component.NotificationSection
+import org.meshtastic.feature.settings.component.ThemePickerDialog
+import org.meshtastic.feature.settings.component.UnitsOption
+import org.meshtastic.feature.settings.component.UnitsPickerDialog
+import org.meshtastic.feature.settings.navigation.ConfigRoute
+import org.meshtastic.feature.settings.navigation.ModuleRoute
+import org.meshtastic.feature.settings.radio.RadioConfigItemList
+import org.meshtastic.feature.settings.radio.RadioConfigViewModel
+import kotlin.time.Duration.Companion.seconds
+
+/**
+ * Desktop-specific top-level settings screen. Replaces the Android `SettingsScreen` which uses Android-specific APIs
+ * (Activity, permissions, etc.).
+ *
+ * Shows radio configuration entry points that are fully shared in commonMain, plus app-level settings (theme,
+ * homoglyph, DB cache limit) and an App Info section (About link, version easter egg).
+ */
+@Suppress("LongMethod")
+@Composable
+fun DesktopSettingsScreen(
+    radioConfigViewModel: RadioConfigViewModel,
+    settingsViewModel: SettingsViewModel,
+    onNavigate: (Route) -> Unit,
+) {
+    val state by radioConfigViewModel.radioConfigState.collectAsStateWithLifecycle()
+    val destNode by radioConfigViewModel.destNode.collectAsStateWithLifecycle()
+    val localConfig by settingsViewModel.localConfig.collectAsStateWithLifecycle()
+    val homoglyphEnabled by radioConfigViewModel.homoglyphEncodingEnabledFlow.collectAsStateWithLifecycle(false)
+    val hiddenFeaturesUnlocked by settingsViewModel.hiddenFeaturesUnlocked.collectAsStateWithLifecycle()
+    val cacheLimit by settingsViewModel.dbCacheLimit.collectAsStateWithLifecycle()
+    val isOtaCapable by settingsViewModel.isOtaCapable.collectAsStateWithLifecycle()
+    val showFullMessageTimestamps by settingsViewModel.showFullMessageTimestamps.collectAsStateWithLifecycle()
+
+    var showThemePickerDialog by remember { mutableStateOf(false) }
+    var showLanguagePickerDialog by remember { mutableStateOf(false) }
+    var showUnitsPickerDialog by remember { mutableStateOf(false) }
+    val unitsOverride = UnitsOverride.fromValue(settingsViewModel.unitsOverride.collectAsStateWithLifecycle().value)
+    if (showUnitsPickerDialog) {
+        UnitsPickerDialog(
+            current = unitsOverride,
+            onClickUnits = { settingsViewModel.setUnitsOverride(it) },
+            onDismiss = { showUnitsPickerDialog = false },
+        )
+    }
+    if (showThemePickerDialog) {
+        ThemePickerDialog(
+            onClickTheme = { settingsViewModel.setTheme(it) },
+            onDismiss = { showThemePickerDialog = false },
+        )
+    }
+
+    if (showLanguagePickerDialog) {
+        LanguagePickerDialog(
+            onSelectLanguage = { tag -> settingsViewModel.setLocale(tag) },
+            onDismiss = { showLanguagePickerDialog = false },
+        )
+    }
+
+    var showAudioCodecPickerDialog by remember { mutableStateOf(false) }
+    val currentAudioCodec by settingsViewModel.audioCodec.collectAsStateWithLifecycle()
+    if (showAudioCodecPickerDialog) {
+        AudioCodecPickerDialog(
+            current = currentAudioCodec,
+            onClickCodec = { settingsViewModel.setAudioCodec(it) },
+            onDismiss = { showAudioCodecPickerDialog = false },
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            MainAppBar(
+                title = stringResource(Res.string.bottom_nav_settings),
+                subtitle =
+                if (state.isLocal) {
+                    null
+                } else {
+                    val remoteName = destNode?.user?.long_name ?: ""
+                    stringResource(Res.string.remotely_administrating, remoteName)
+                },
+                ourNode = null,
+                showNodeChip = false,
+                canNavigateUp = false,
+                onNavigateUp = {},
+                actions = {},
+                onClickChip = {},
+            )
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier.padding(paddingValues).verticalScroll(rememberScrollState()).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            RadioConfigItemList(
+                state = state,
+                isManaged = localConfig.security?.is_managed ?: false,
+                isOtaCapable = isOtaCapable,
+                onRouteClick = { route ->
+                    val navRoute =
+                        when (route) {
+                            is ConfigRoute -> route.route
+                            is ModuleRoute -> route.route
+                            else -> null
+                        }
+                    navRoute?.let { onNavigate(it) }
+                },
+                onNavigate = onNavigate,
+                onImport = {
+                    // Profile import not yet supported on Desktop
+                },
+                onExport = {
+                    // Profile export not yet supported on Desktop
+                },
+            )
+
+            // App-local settings are only relevant when configuring the local node
+            if (state.isLocal) {
+                ExpressiveSection(title = stringResource(Res.string.app_settings)) {
+                    ListItem(
+                        text = stringResource(Res.string.theme),
+                        leadingIcon = MeshtasticIcons.FormatPaint,
+                        trailingIcon = null,
+                    ) {
+                        showThemePickerDialog = true
+                    }
+
+                    ListItem(
+                        text = stringResource(Res.string.preferences_language),
+                        leadingIcon = MeshtasticIcons.Language,
+                        trailingIcon = null,
+                    ) {
+                        showLanguagePickerDialog = true
+                    }
+
+                    ListItem(
+                        text = stringResource(Res.string.units),
+                        supportingText =
+                        stringResource(UnitsOption.entries.first { it.override == unitsOverride }.label),
+                        leadingIcon = MeshtasticIcons.Distance,
+                        trailingIcon = null,
+                    ) {
+                        showUnitsPickerDialog = true
+                    }
+
+                    ListItem(
+                        text = "Audio Codec (PTT & Voice)",
+                        supportingText = currentAudioCodec,
+                        leadingIcon = MeshtasticIcons.Speaker,
+                        trailingIcon = null,
+                    ) {
+                        showAudioCodecPickerDialog = true
+                    }
+
+                    FullMessageTimestampsSetting(
+                        checked = showFullMessageTimestamps,
+                        onCheckedChange = settingsViewModel::setShowFullMessageTimestamps,
+                    )
+
+                    HomoglyphSetting(
+                        homoglyphEncodingEnabled = homoglyphEnabled,
+                        onToggle = { radioConfigViewModel.toggleHomoglyphCharactersEncodingEnabled() },
+                    )
+
+                    CacheLimitPreference(
+                        cacheLimit = cacheLimit,
+                        onCheckEvictionCount = { settingsViewModel.cachedDeviceCountExceeding(it) },
+                        onSetCacheLimit = { settingsViewModel.setDbCacheLimit(it) },
+                    )
+                }
+
+                ExpressiveSection(title = stringResource(Res.string.node_layout_section_title)) {
+                    ListItem(
+                        text = stringResource(Res.string.node_layout_section_title),
+                        leadingIcon = MeshtasticIcons.List,
+                    ) {
+                        onNavigate(SettingsRoute.NodeList)
+                    }
+                }
+
+                ExpressiveSection(title = stringResource(Res.string.discovery_local_mesh)) {
+                    ListItem(
+                        text = stringResource(Res.string.discovery_local_mesh),
+                        leadingIcon = MeshtasticIcons.PermScanWifi,
+                    ) {
+                        onNavigate(DiscoveryRoute.DiscoveryGraph)
+                    }
+                }
+
+                ExpressiveSection(title = stringResource(Res.string.device_links)) {
+                    ListItem(text = stringResource(Res.string.device_links), leadingIcon = MeshtasticIcons.Device) {
+                        onNavigate(SettingsRoute.DeviceLinks)
+                    }
+                }
+
+                ExpressiveSection(title = stringResource(Res.string.wifi_devices)) {
+                    ListItem(text = stringResource(Res.string.wifi_devices), leadingIcon = MeshtasticIcons.Wifi) {
+                        onNavigate(WifiProvisionRoute.WifiProvision())
+                    }
+                }
+
+                NotificationSection(
+                    messagesEnabled = settingsViewModel.messagesEnabled.collectAsStateWithLifecycle().value,
+                    onToggleMessages = { settingsViewModel.setMessagesEnabled(it) },
+                    nodeEventsEnabled = settingsViewModel.nodeEventsEnabled.collectAsStateWithLifecycle().value,
+                    onToggleNodeEvents = { settingsViewModel.setNodeEventsEnabled(it) },
+                    lowBatteryEnabled = settingsViewModel.lowBatteryEnabled.collectAsStateWithLifecycle().value,
+                    onToggleLowBattery = { settingsViewModel.setLowBatteryEnabled(it) },
+                )
+
+                ExpressiveSection(title = stringResource(Res.string.help_and_documentation)) {
+                    ListItem(
+                        text = stringResource(Res.string.help_and_documentation),
+                        leadingIcon = MeshtasticIcons.HelpOutline,
+                    ) {
+                        onNavigate(SettingsRoute.HelpDocs)
+                    }
+                }
+
+                DesktopAppInfoSection(
+                    appVersionName = settingsViewModel.appVersionName,
+                    hiddenFeaturesUnlocked = hiddenFeaturesUnlocked,
+                    onUnlockHiddenFeatures = { settingsViewModel.unlockHiddenFeatures() },
+                    onNavigateToAbout = { onNavigate(SettingsRoute.About) },
+                )
+            }
+        }
+    }
+}
+
+/** Desktop App Info section: About link and version with hidden-features unlock easter egg. */
+@Composable
+private fun DesktopAppInfoSection(
+    appVersionName: String,
+    hiddenFeaturesUnlocked: Boolean,
+    onUnlockHiddenFeatures: () -> Unit,
+    onNavigateToAbout: () -> Unit,
+) {
+    ExpressiveSection(title = stringResource(Res.string.info)) {
+        ListItem(
+            text = stringResource(Res.string.about),
+            leadingIcon = MeshtasticIcons.Info,
+            trailingIcon = MeshtasticIcons.ChevronRight,
+        ) {
+            onNavigateToAbout()
+        }
+
+        DesktopAppVersionButton(
+            hiddenFeaturesUnlocked = hiddenFeaturesUnlocked,
+            appVersionName = appVersionName,
+            onUnlockHiddenFeatures = onUnlockHiddenFeatures,
+        )
+    }
+}
+
+private const val UNLOCK_CLICK_COUNT = 5
+private const val UNLOCKED_CLICK_COUNT = 3
+private const val UNLOCK_TIMEOUT_SECONDS = 1
+
+@Composable
+private fun DesktopAppVersionButton(
+    hiddenFeaturesUnlocked: Boolean,
+    appVersionName: String,
+    onUnlockHiddenFeatures: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val showToast = rememberShowToastResource()
+    var clickCount by remember { mutableStateOf(0) }
+
+    LaunchedEffect(clickCount) {
+        if (clickCount in 1..<UNLOCK_CLICK_COUNT) {
+            delay(UNLOCK_TIMEOUT_SECONDS.seconds)
+            clickCount = 0
+        }
+    }
+
+    ListItem(
+        text = stringResource(Res.string.app_version),
+        leadingIcon = MeshtasticIcons.Memory,
+        supportingText = appVersionName,
+        trailingIcon = null,
+    ) {
+        clickCount = clickCount.inc().coerceIn(0, UNLOCK_CLICK_COUNT)
+
+        when {
+            clickCount == UNLOCKED_CLICK_COUNT && hiddenFeaturesUnlocked -> {
+                clickCount = 0
+                scope.launch { showToast(Res.string.modules_already_unlocked) }
+            }
+
+            clickCount == UNLOCK_CLICK_COUNT -> {
+                clickCount = 0
+                onUnlockHiddenFeatures()
+                scope.launch { showToast(Res.string.modules_unlocked) }
+            }
+        }
+    }
+}
+
+/**
+ * Supported languages — tag must match the CMP `values-<qualifier>` directory names. Empty tag means system default.
+ * Display names are written in the native language for clarity.
+ */
+private val SUPPORTED_LANGUAGES =
+    listOf(
+        "" to "System default",
+        "ar" to "العربية",
+        "be" to "Беларуская",
+        "bg" to "Български",
+        "ca" to "Català",
+        "cs" to "Čeština",
+        "de" to "Deutsch",
+        "el" to "Ελληνικά",
+        "en" to "English",
+        "es" to "Español",
+        "et" to "Eesti",
+        "fi" to "Suomi",
+        "fr" to "Français",
+        "ga" to "Gaeilge",
+        "gl" to "Galego",
+        "he" to "עברית",
+        "hr" to "Hrvatski",
+        "ht" to "Kreyòl Ayisyen",
+        "hu" to "Magyar",
+        "is" to "Íslenska",
+        "it" to "Italiano",
+        "ja" to "日本語",
+        "ko" to "한국어",
+        "lt" to "Lietuvių",
+        "nl" to "Nederlands",
+        "no" to "Norsk",
+        "pl" to "Polski",
+        "pt" to "Português",
+        "pt-BR" to "Português (Brasil)",
+        "ro" to "Română",
+        "ru" to "Русский",
+        "sk" to "Slovenčina",
+        "sl" to "Slovenščina",
+        "sq" to "Shqip",
+        "sr" to "Српски",
+        "sv" to "Svenska",
+        "tr" to "Türkçe",
+        "uk" to "Українська",
+        "zh-CN" to "中文 (简体)",
+        "zh-TW" to "中文 (繁體)",
+    )
+
+@Composable
+private fun LanguagePickerDialog(onSelectLanguage: (String) -> Unit, onDismiss: () -> Unit) {
+    MeshtasticDialog(
+        title = stringResource(Res.string.preferences_language),
+        onDismiss = onDismiss,
+        text = {
+            LazyColumn {
+                items(SUPPORTED_LANGUAGES) { (tag, displayName) ->
+                    ListItem(text = displayName, trailingIcon = null) {
+                        onSelectLanguage(tag)
+                        onDismiss()
+                    }
+                }
+            }
+        },
+    )
+}

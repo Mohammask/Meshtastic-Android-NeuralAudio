@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>MagicNumber:XModemManagerImpl.kt:XModemManagerImpl$0x8000</ID>
+    <ID>MagicNumber:XModemManagerImpl.kt:XModemManagerImpl$0xFF</ID>
+    <ID>MagicNumber:XModemManagerImpl.kt:XModemManagerImpl$0xFFFF</ID>
+    <ID>MagicNumber:XModemManagerImpl.kt:XModemManagerImpl$8</ID>
+  </CurrentIssues>
+</SmellBaseline>

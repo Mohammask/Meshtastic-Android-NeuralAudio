@@ -1,0 +1,1 @@
+詳細なリリースノートはこちらをご覧ください：https://github.com/meshtastic/Meshtastic-Android/releases/

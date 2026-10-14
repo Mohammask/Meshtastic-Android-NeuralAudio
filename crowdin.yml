@@ -1,0 +1,25 @@
+# Explicit because CLI 5 removed --preserve-hierarchy (it is now the default);
+# pinning it here keeps the layout independent of that default.
+preserve_hierarchy: true
+
+files:
+  - source: /**/composeResources/values/strings.xml
+    translation: /%original_path%-%two_letters_code%/strings.xml
+    translate_attributes: 0
+    content_segmentation: 0
+    escape_quotes: 0
+    escape_special_characters: 0
+    type: android
+  - source: /fastlane/metadata/android/en-US/*.txt
+    translation: /fastlane/metadata/android/%locale%/%original_file_name%
+  - source: /fastlane/metadata/android/en-US/changelogs/default.txt
+    translation: /fastlane/metadata/android/%locale%/changelogs/%original_file_name%
+  # In-app docs — user guide only (developer guide is English-only)
+  # English sources live under docs/en/; translations land at docs/{android_code}/
+  # Uses %android_code% to output Android/CMP qualifier format directly (pt-rBR, zh-rCN, fr)
+  - source: /docs/en/user/*.md
+    translation: /docs/%android_code%/user/%original_file_name%
+    type: md
+  - source: /docs/en/index.md
+    translation: /docs/%android_code%/%original_file_name%
+    type: md

@@ -1,0 +1,60 @@
+/*
+ * Copyright (c) 2026 Meshtastic LLC
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+plugins {
+    alias(libs.plugins.meshtastic.android.library)
+    alias(libs.plugins.meshtastic.android.library.compose)
+    alias(libs.plugins.meshtastic.koin)
+}
+
+android {
+    namespace = "org.meshtastic.feature.widget"
+    resourcePrefix = "widget_"
+
+    defaultConfig { minSdk = 26 }
+
+    // Glance unit tests resolve Compose-resources strings through a real Context, so the merged
+    // Android resources and assets must be on the Robolectric test classpath.
+    testOptions { unitTests { isIncludeAndroidResources = true } }
+}
+
+dependencies {
+    implementation(projects.core.common)
+    implementation(projects.core.model)
+    implementation(projects.core.resources)
+    implementation(projects.core.repository)
+
+    implementation(libs.compose.multiplatform.ui) // LocalConfiguration, LocalDensity
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
+    implementation(libs.androidx.glance.preview)
+    implementation(libs.androidx.glance.appwidget.preview)
+
+    implementation(libs.compose.multiplatform.resources)
+    implementation(libs.kermit)
+
+    testImplementation(kotlin("test-junit"))
+    testImplementation(libs.androidx.glance.testing)
+    testImplementation(libs.androidx.glance.appwidget.testing)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.androidx.test.ext.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.robolectric)
+    // Robolectric's runner is JUnit 4; configureTestOptions() turns on useJUnitPlatform() for this
+    // task, so the vintage engine is what actually discovers and runs these tests.
+    testRuntimeOnly(libs.junit.vintage.engine)
+}
